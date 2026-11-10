@@ -1,0 +1,709 @@
+{
+ "path": [],
+ "role": "AXApplication",
+ "attrs": {
+  "AXRole": "AXApplication",
+  "AXTitle": "WhatsApp"
+ },
+ "frame": null,
+ "children": [
+  {
+   "path": [
+    0
+   ],
+   "role": "AXWindow",
+   "attrs": {
+    "AXRole": "AXWindow",
+    "AXSubrole": "AXStandardWindow",
+    "AXIdentifier": "SceneWindow"
+   },
+   "frame": [
+    994,
+    39,
+    1200,
+    800
+   ],
+   "children": [
+    {
+     "path": [
+      0,
+      0
+     ],
+     "role": "AXGroup",
+     "attrs": {
+      "AXRole": "AXGroup"
+     },
+     "frame": null,
+     "children": [
+      {
+       "path": [
+        0,
+        0,
+        0
+       ],
+       "role": "AXGroup",
+       "attrs": {
+        "AXRole": "AXGroup"
+       },
+       "frame": null,
+       "children": [
+        {
+         "path": [
+          0,
+          0,
+          0,
+          0
+         ],
+         "role": "AXGroup",
+         "attrs": {
+          "AXRole": "AXGroup"
+         },
+         "frame": null,
+         "children": []
+        },
+        {
+         "path": [
+          0,
+          0,
+          0,
+          1
+         ],
+         "role": "AXGroup",
+         "attrs": {
+          "AXRole": "AXGroup"
+         },
+         "frame": null,
+         "children": [
+          {
+           "path": [
+            0,
+            0,
+            0,
+            1,
+            0
+           ],
+           "role": "AXGroup",
+           "attrs": {
+            "AXRole": "AXGroup"
+           },
+           "frame": null,
+           "children": [
+            {
+             "path": [
+              0,
+              0,
+              0,
+              1,
+              0,
+              0
+             ],
+             "role": "AXGroup",
+             "attrs": {
+              "AXRole": "AXGroup",
+              "AXIdentifier": "WDSNavigationBar"
+             },
+             "frame": null,
+             "children": []
+            },
+            {
+             "path": [
+              0,
+              0,
+              0,
+              1,
+              0,
+              1
+             ],
+             "role": "AXGroup",
+             "attrs": {
+              "AXRole": "AXGroup"
+             },
+             "frame": null,
+             "children": [
+              {
+               "path": [
+                0,
+                0,
+                0,
+                1,
+                0,
+                1,
+                0
+               ],
+               "role": "AXGroup",
+               "attrs": {
+                "AXRole": "AXGroup"
+               },
+               "frame": null,
+               "children": [
+                {
+                 "path": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  0,
+                  1,
+                  0,
+                  0
+                 ],
+                 "role": "AXGroup",
+                 "attrs": {
+                  "AXRole": "AXGroup",
+                  "AXIdentifier": "ChatListView_TableView",
+                  "AXDescription": "‎채팅 리스트"
+                 },
+                 "frame": [
+                  994,
+                  39,
+                  605,
+                  800
+                 ],
+                 "children": [
+                  {
+                   "path": [
+                    0,
+                    0,
+                    0,
+                    1,
+                    0,
+                    1,
+                    0,
+                    0,
+                    0
+                   ],
+                   "role": "AXGroup",
+                   "attrs": {
+                    "AXRole": "AXGroup"
+                   },
+                   "frame": [
+                    994,
+                    149,
+                    605,
+                    72
+                   ],
+                   "children": [
+                    {
+                     "path": [
+                      0,
+                      0,
+                      0,
+                      1,
+                      0,
+                      1,
+                      0,
+                      0,
+                      0,
+                      0
+                     ],
+                     "role": "AXStaticText",
+                     "attrs": {
+                      "AXRole": "AXStaticText",
+                      "AXDescription": "‎친구 및 가족과 그룹 대화를 시작하세요."
+                     },
+                     "frame": null,
+                     "children": []
+                    }
+                   ]
+                  },
+                  {
+                   "path": [
+                    0,
+                    0,
+                    0,
+                    1,
+                    0,
+                    1,
+                    0,
+                    0,
+                    1
+                   ],
+                   "role": "AXGroup",
+                   "attrs": {
+                    "AXRole": "AXGroup",
+                    "AXIdentifier": "ChatListView_chipButtonsCell"
+                   },
+                   "frame": null,
+                   "children": []
+                  },
+                  {
+                   "path": [
+                    0,
+                    0,
+                    0,
+                    1,
+                    0,
+                    1,
+                    0,
+                    0,
+                    2
+                   ],
+                   "role": "AXButton",
+                   "attrs": {
+                    "AXRole": "AXButton",
+                    "AXDescription": "김민수",
+                    "AXValue": "‎메시지, 내일 예약 가능할까요?, 년 11월 9일 오후 3:05, ‎김민수님께 받았습니다",
+                    "AXHelp": "‎대화를 열려면 두 번 탭하세요"
+                   },
+                   "frame": [
+                    994,
+                    274,
+                    605,
+                    69
+                   ],
+                   "children": []
+                  },
+                  {
+                   "path": [
+                    0,
+                    0,
+                    0,
+                    1,
+                    0,
+                    1,
+                    0,
+                    0,
+                    3
+                   ],
+                   "role": "AXGenericElement",
+                   "attrs": {
+                    "AXRole": "AXGenericElement",
+                    "AXDescription": "+ 1,5 5 5,1 2 3,4 5 6 7",
+                    "AXValue": "‎내 메시지, Yes, 3pm works, 년 11월 9일 오전 11:40, ‎+ 1,5 5 5,1 2 3,4 5 6 7님께 보냈습니다., ‎읽음",
+                    "AXHelp": "‎대화를 열려면 두 번 탭하세요",
+                    "AXSelected": true
+                   },
+                   "frame": [
+                    994,
+                    343,
+                    605,
+                    69
+                   ],
+                   "children": []
+                  },
+                  {
+                   "path": [
+                    0,
+                    0,
+                    0,
+                    1,
+                    0,
+                    1,
+                    0,
+                    0,
+                    4
+                   ],
+                   "role": "AXStaticText",
+                   "attrs": {
+                    "AXRole": "AXStaticText",
+                    "AXDescription": "+ 1,5 5 5,1 2 3,4 5 6 7",
+                    "AXValue": "‎내 메시지, Yes, 3pm works, 년 11월 9일 오전 11:40, ‎+ 1,5 5 5,1 2 3,4 5 6 7님께 보냈습니다., ‎읽음",
+                    "AXHelp": "‎대화를 열려면 두 번 탭하세요",
+                    "AXSelected": true
+                   },
+                   "frame": [
+                    994,
+                    343,
+                    605,
+                    69
+                   ],
+                   "children": []
+                  }
+                 ]
+                }
+               ]
+              }
+             ]
+            }
+           ]
+          },
+          {
+           "path": [
+            0,
+            0,
+            0,
+            1,
+            1
+           ],
+           "role": "AXSplitter",
+           "attrs": {
+            "AXRole": "AXSplitter"
+           },
+           "frame": null,
+           "children": []
+          },
+          {
+           "path": [
+            0,
+            0,
+            0,
+            1,
+            2
+           ],
+           "role": "AXGroup",
+           "attrs": {
+            "AXRole": "AXGroup"
+           },
+           "frame": [
+            1600,
+            39,
+            594,
+            800
+           ],
+           "children": [
+            {
+             "path": [
+              0,
+              0,
+              0,
+              1,
+              2,
+              0
+             ],
+             "role": "AXGroup",
+             "attrs": {
+              "AXRole": "AXGroup",
+              "AXIdentifier": "WDSNavigationBar"
+             },
+             "frame": null,
+             "children": [
+              {
+               "path": [
+                0,
+                0,
+                0,
+                1,
+                2,
+                0,
+                0
+               ],
+               "role": "AXButton",
+               "attrs": {
+                "AXRole": "AXButton",
+                "AXIdentifier": "NavigationBar_HeaderViewButton",
+                "AXDescription": "‪+1 (555) 123‑4567‬"
+               },
+               "frame": [
+                1653,
+                49,
+                133,
+                36
+               ],
+               "children": []
+              }
+             ]
+            },
+            {
+             "path": [
+              0,
+              0,
+              0,
+              1,
+              2,
+              1
+             ],
+             "role": "AXGroup",
+             "attrs": {
+              "AXRole": "AXGroup"
+             },
+             "frame": null,
+             "children": [
+              {
+               "path": [
+                0,
+                0,
+                0,
+                1,
+                2,
+                1,
+                0
+               ],
+               "role": "AXGroup",
+               "attrs": {
+                "AXRole": "AXGroup"
+               },
+               "frame": null,
+               "children": [
+                {
+                 "path": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  2,
+                  1,
+                  0,
+                  0
+                 ],
+                 "role": "AXButton",
+                 "attrs": {
+                  "AXRole": "AXButton"
+                 },
+                 "frame": null,
+                 "children": []
+                },
+                {
+                 "path": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  2,
+                  1,
+                  0,
+                  1
+                 ],
+                 "role": "AXButton",
+                 "attrs": {
+                  "AXRole": "AXButton"
+                 },
+                 "frame": null,
+                 "children": []
+                },
+                {
+                 "path": [
+                  0,
+                  0,
+                  0,
+                  1,
+                  2,
+                  1,
+                  0,
+                  2
+                 ],
+                 "role": "AXGroup",
+                 "attrs": {
+                  "AXRole": "AXGroup",
+                  "AXIdentifier": "ChatMessagesTableView"
+                 },
+                 "frame": [
+                  1600,
+                  39,
+                  594,
+                  800
+                 ],
+                 "children": [
+                  {
+                   "path": [
+                    0,
+                    0,
+                    0,
+                    1,
+                    2,
+                    1,
+                    0,
+                    2,
+                    0
+                   ],
+                   "role": "AXStaticText",
+                   "attrs": {
+                    "AXRole": "AXStaticText",
+                    "AXIdentifier": "WAMessageBubbleTableViewCell",
+                    "AXDescription": "‎메시지, Hi, how much is botox?\nAnd do you have parking?, 년 11월 8일 오후 11:58, ‎+ 1,5 5 5,1 2 3,4 5 6 7님께 받았습니다"
+                   },
+                   "frame": [
+                    1616,
+                    33,
+                    380,
+                    40
+                   ],
+                   "children": []
+                  },
+                  {
+                   "path": [
+                    0,
+                    0,
+                    0,
+                    1,
+                    2,
+                    1,
+                    0,
+                    2,
+                    1
+                   ],
+                   "role": "AXHeading",
+                   "attrs": {
+                    "AXRole": "AXHeading"
+                   },
+                   "frame": [
+                    1600,
+                    80,
+                    594,
+                    34
+                   ],
+                   "children": []
+                  },
+                  {
+                   "path": [
+                    0,
+                    0,
+                    0,
+                    1,
+                    2,
+                    1,
+                    0,
+                    2,
+                    2
+                   ],
+                   "role": "AXStaticText",
+                   "attrs": {
+                    "AXRole": "AXStaticText",
+                    "AXIdentifier": "WAMessageBubbleTableViewCell",
+                    "AXDescription": "‎내 메시지, 네, 년 11월 9일 오전 9:01, ‎+ 1,5 5 5,1 2 3,4 5 6 7님께 보냈습니다., ‎읽음"
+                   },
+                   "frame": [
+                    1616,
+                    120,
+                    380,
+                    40
+                   ],
+                   "children": []
+                  },
+                  {
+                   "path": [
+                    0,
+                    0,
+                    0,
+                    1,
+                    2,
+                    1,
+                    0,
+                    2,
+                    3
+                   ],
+                   "role": "AXStaticText",
+                   "attrs": {
+                    "AXRole": "AXStaticText",
+                    "AXIdentifier": "WAMessageBubbleTableViewCell",
+                    "AXDescription": "‎내 메시지, 네, 년 11월 9일 오전 9:01, ‎+ 1,5 5 5,1 2 3,4 5 6 7님께 보냈습니다., ‎전송됨"
+                   },
+                   "frame": [
+                    1616,
+                    160,
+                    380,
+                    40
+                   ],
+                   "children": []
+                  },
+                  {
+                   "path": [
+                    0,
+                    0,
+                    0,
+                    1,
+                    2,
+                    1,
+                    0,
+                    2,
+                    4
+                   ],
+                   "role": "AXStaticText",
+                   "attrs": {
+                    "AXRole": "AXStaticText",
+                    "AXIdentifier": "WAMessageBubbleTableViewCell",
+                    "AXDescription": "‎메시지, Price, list, please, 년 11월 9일 오전 11:39, ‎+ 1,5 5 5,1 2 3,4 5 6 7님께 받았습니다"
+                   },
+                   "frame": [
+                    1616,
+                    200,
+                    380,
+                    40
+                   ],
+                   "children": []
+                  },
+                  {
+                   "path": [
+                    0,
+                    0,
+                    0,
+                    1,
+                    2,
+                    1,
+                    0,
+                    2,
+                    5
+                   ],
+                   "role": "AXStaticText",
+                   "attrs": {
+                    "AXRole": "AXStaticText",
+                    "AXIdentifier": "WAMessageBubbleTableViewCell",
+                    "AXDescription": "‎내 메시지, Yes, 3pm works, 년 11월 9일 오전 11:40, ‎+ 1,5 5 5,1 2 3,4 5 6 7님께 보냈습니다., ‎읽음"
+                   },
+                   "frame": [
+                    1616,
+                    240,
+                    380,
+                    40
+                   ],
+                   "children": []
+                  },
+                  {
+                   "path": [
+                    0,
+                    0,
+                    0,
+                    1,
+                    2,
+                    1,
+                    0,
+                    2,
+                    6
+                   ],
+                   "role": "AXStaticText",
+                   "attrs": {
+                    "AXRole": "AXStaticText",
+                    "AXIdentifier": "WAMessageBubbleTableViewCell",
+                    "AXDescription": "‎이 비즈니스는 이제 Meta의 안전한 서비스를 이용하여 대화를 관리합니다."
+                   },
+                   "frame": [
+                    1616,
+                    280,
+                    380,
+                    40
+                   ],
+                   "children": []
+                  },
+                  {
+                   "path": [
+                    0,
+                    0,
+                    0,
+                    1,
+                    2,
+                    1,
+                    0,
+                    2,
+                    7
+                   ],
+                   "role": "AXStaticText",
+                   "attrs": {
+                    "AXRole": "AXStaticText",
+                    "AXIdentifier": "WAMessageBubbleTableViewCell",
+                    "AXDescription": "‎메시지, 12월 31일 오후 3:00 가능?, 년 12월 30일 오후 12:05, ‎+ 1,5 5 5,1 2 3,4 5 6 7님께 받았습니다"
+                   },
+                   "frame": [
+                    1616,
+                    320,
+                    380,
+                    40
+                   ],
+                   "children": []
+                  }
+                 ]
+                }
+               ]
+              }
+             ]
+            }
+           ]
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

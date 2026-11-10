@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+config.yaml
+data/
+logs/
+.superpowers/
+.pytest_cache/
+web/node_modules/
+web/dist/
+ax_dumps/
+dist/
+.DS_Store

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.clinicbridge.whatsapp</string>
+  <!-- The app (not python) is started, so 손쉬운 사용 is granted to "WhatsApp 수집기". -->
+  <key>ProgramArguments</key>
+  <array><string>__APP__/Contents/MacOS/WhatsAppCollector</string></array>
+  <key>AssociatedBundleIdentifiers</key><string>com.clinicbridge.whatsapp-collector</string>
+  <key>RunAtLoad</key><true/>
+  <!-- relaunch after a crash; menu "종료" exits 0 and stays stopped -->
+  <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
+  <key>ThrottleInterval</key><integer>10</integer>
+  <key>ProcessType</key><string>Interactive</string>
+  <key>LimitLoadToSessionType</key><string>Aqua</string>
+  <key>StandardOutPath</key><string>__LOGS__/app-launcher.log</string>
+  <key>StandardErrorPath</key><string>__LOGS__/app-launcher.log</string>
+</dict>
+</plist>

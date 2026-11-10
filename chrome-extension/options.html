@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>CB 메시지 감시 설정</title>
+<style>
+  body { font: 14px -apple-system, "Apple SD Gothic Neo", sans-serif; max-width: 520px; margin: 32px auto; padding: 0 16px; color: #1d1d1f; }
+  label { display: block; margin: 14px 0 4px; font-weight: 600; }
+  input { width: 100%; padding: 8px; font: inherit; box-sizing: border-box; }
+  button { margin-top: 16px; padding: 8px 16px; font: inherit; }
+  .muted { color: #6e6e73; font-size: 13px; }
+</style>
+</head>
+<body>
+<h1>CB 메시지 감시 설정</h1>
+<label for="serverUrl">수집기 주소</label>
+<input id="serverUrl" placeholder="http://localhost:8787">
+<label for="token">연결 토큰</label>
+<input id="token" type="password" placeholder=".env 의 INGEST_TOKEN 값">
+<p class="muted">수집기(.env)의 INGEST_TOKEN과 같은 값을 넣어 주세요.</p>
+<button id="save">저장</button> <span id="msg" class="muted"></span>
+<script src="options.js"></script>
+</body>
+</html>

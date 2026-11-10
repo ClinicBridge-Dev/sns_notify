@@ -1,0 +1,55 @@
+# Copy to config.yaml. Secrets live in .env (chmod 600); here you only name the env keys.
+db_path: data/whatsapp.db
+
+server:
+  host: 0.0.0.0          # LAN. Use 127.0.0.1 once Cloudflare Tunnel fronts the viewer.
+  port: 8787
+  auth: password         # password (VIEWER_PASSWORD + SESSION_SECRET in .env) | none (localhost only)
+  session_hours: 12
+
+collector:
+  poll_interval_sec: 5          # re-check cadence; tune from Phase 0 measurements
+  full_sweep_interval_sec: 300  # open every conversation even if its list row looks unchanged
+  recent_window: 30             # newest N messages re-read per conversation
+  baseline_max: 200             # first-run history per conversation
+  catchup_after_sec: 120        # gap after which newly found messages are marked 지연 수집
+  include_groups: false
+  stall_timeout_sec: 600        # no progress inside a pass this long -> process exits, launchd restarts it
+
+translator:
+  model: gpt-4o-mini
+  api_key_ref: OPENAI_API_KEY
+  wait_before_slack_sec: 60     # post 원문 first, then chat.update with the translation
+  max_attempts: 5
+
+slack:
+  timeout_sec: 10
+  max_attempts: 5
+
+ops:
+  slack_channel_id: C00000000   # ops-only channel (not a client channel)
+  slack_token_ref: SLACK_TOKEN_MAIN
+  heartbeat_interval_sec: 600
+  backup_dir: ~/WhatsAppBackups # point at an encrypted external volume or a Time Machine-covered path
+  backup_keep_days: 14
+  backup_hour_local: 4
+
+# Instagram DM "new message" notices (Chrome extension in chrome-extension/). account -> client key.
+# Alerts cover the Primary and General tabs; keep one Chrome window open on each (docs/OPERATIONS.md).
+instagram:
+  - account: daclinic_en
+    client: clinic-a
+
+clients:
+  - key: clinic-a
+    name: A 클리닉
+    slack_channel_id: C11111111
+    slack_token_ref: SLACK_TOKEN_MAIN
+    accounts:
+      - key: clinic-a-wa1
+        label: A 상담 계정
+        collect_method: ax
+        # notify (default): watch the chat list only and alert Slack; chats are never opened, so the
+        #   unread badges stay. collect: open chats and store full transcripts (marks them as read).
+        mode: notify
+        exclude: []              # display names to skip
