@@ -11,7 +11,7 @@ const el = {
   nodeType: 1,
   get innerText() { return env.text; },
   contains(n) { return n === el; },
-  focus() {},
+  focus() { if (env.onFocus) env.onFocus(); },
   dispatchEvent(ev) {
     if (ev.type === 'paste') env.onPaste(ev.clipboardData.getData('text/plain'));
     if (ev.type === 'keydown') { env.syntheticKeys.push(ev); C._gate.onKeyEvent(ev); if (!ev.prevented && env.enterSends) env.text = ''; }
@@ -37,7 +37,8 @@ global.MBX.util = {
     if (type === 'GET_THREAD_LANG') return Promise.resolve({ threadId: payload.threadId, lang: 'EN-US' });
     return Promise.resolve({ ok: true });
   },
-  connected: () => env.connected,
+  connected: () => env.port, // port 유무. 판단에는 쓰지 않는다
+  alive: () => env.connected, // 확장 컨텍스트가 살아 있는지
   settings: () => env.settings,
   toast: (t) => env.toasts.push(t),
   host: () => null,
@@ -68,13 +69,14 @@ const G = C._gate;
 
 function reset(o) {
   env = Object.assign({
-    text: '안녕하세요', thread: '1', path: '/latest/inbox/all', connected: true,
+    text: '안녕하세요', thread: '1', path: '/latest/inbox/all', connected: true, port: true, onFocus: null,
     settings: { sendTranslateEnabled: true }, hasComposer: true, hasButton: true, emptyOnClick: true, enterSends: true,
     clicks: 0, sends: [], toasts: [], syntheticKeys: [],
     onPaste(t) { env.text = t; }, // Lexical이 붙여넣기를 전체 교체로 반영
     translate: () => Promise.resolve({ ok: true, text: 'Hello', detectedLang: 'KO' })
   }, o || {});
   G.onThreadChanged();
+  G.tickClear();
   G.setLang(env.thread, o && o.lang !== undefined ? o.lang : 'EN-US');
   env.toasts.length = 0;
 }
@@ -331,4 +333,86 @@ test('Windows-style composing keydown (key Process, code Enter) is recognised', 
   assert.equal(k.stopped, true);
   G.onThreadChanged(); // 대화가 바뀌면 전송 대기를 즉시 끈다
   assert.equal(G.state().pending, false);
+});
+
+// ---- fix round 1 ----
+const MSG_WRONG = '번역 중 대화가 바뀌어 번역문이 지금 입력창에 들어갔을 수 있습니다. 전송하지 않았습니다. 입력창을 확인하고 지운 뒤 다시 입력하세요';
+
+test('thread switch before the paste (during the select-all frame): nothing is inserted into the new thread composer', async () => {
+  reset();
+  env.onFocus = () => { env.onFocus = null; env.thread = '2'; env.text = 'B 대화 초안'; }; // insertText 시작 직후 대화 B로 이동(같은 입력창 재사용)
+  G.onKeyEvent(enter());
+  await idle();
+  assert.equal(env.text, 'B 대화 초안'); // 번역문이 들어가지 않았고 B의 초안이 그대로다
+  assert.equal(env.clicks, 0);
+  assert.equal(G.state().quarantine, null);
+});
+
+test('thread switch right as the paste lands: translation is quarantined, warned, and never passed to Meta in the new thread', async () => {
+  reset();
+  env.onPaste = (t) => { env.text = t; env.thread = '2'; }; // 붙여넣기 반영과 동시에 대화가 바뀜
+  G.onKeyEvent(enter());
+  await idle();
+  assert.equal(env.clicks, 0);
+  assert.equal(env.text, 'Hello');
+  assert.ok(env.toasts.includes(MSG_WRONG));
+  G.setLang('2', 'EN-US');
+  env.toasts.length = 0;
+  for (const ev of [enter(), new Ev('keyup', { key: 'Enter', code: 'Enter' }), new Ev('click', { target: btn }), enter({ isComposing: true, keyCode: 229 })]) {
+    (ev.type === 'click' ? G.onPointerEvent : G.onKeyEvent)(ev);
+    assert.equal(ev.stopped, true, ev.type);
+  }
+  assert.ok(env.toasts.includes(MSG_WRONG));
+  assert.equal(env.clicks, 0);
+  // 사용자가 내용을 고치면 격리가 풀리고 평소 규칙(한글 없음 → 통과)으로 돌아간다.
+  env.text = 'Hello there';
+  G.tickClear();
+  const e = enter();
+  G.onKeyEvent(e);
+  assert.equal(e.prevented, false);
+});
+
+test('Review Focus 1: disconnected while the thread language is not loaded shows the reload notice, not the loading message', () => {
+  reset({ connected: false, lang: null });
+  const e = enter();
+  G.onKeyEvent(e);
+  assert.equal(e.prevented, true);
+  assert.ok(env.toasts.includes('확장 프로그램이 갱신되었습니다. 페이지를 새로고침하세요'));
+  assert.ok(!env.toasts.includes('번역 설정을 불러오는 중입니다. 잠시 후 다시 시도하세요'));
+  assert.equal(translates().length, 0);
+});
+
+test('port missing but extension context alive (service worker restart) still translates and sends', async () => {
+  reset({ port: false });
+  G.onKeyEvent(enter());
+  await idle();
+  assert.equal(translates().length, 1);
+  assert.equal(env.clicks, 1);
+  assert.ok(!env.toasts.some((t) => /새로고침/.test(t)));
+});
+
+test('composer present but no selected_item_id: distinct reopen message', () => {
+  reset({ lang: null, thread: null });
+  const e = enter();
+  G.onKeyEvent(e);
+  assert.equal(e.prevented, true);
+  assert.ok(env.toasts.includes('대화를 확인할 수 없어 번역 전송을 막았습니다. 대화를 다시 열어 주세요'));
+});
+
+test('thread view open but composer not found for 5s: one status notice per thread', () => {
+  reset({ hasComposer: false });
+  const realNow = Date.now;
+  let now = 1000000;
+  Date.now = () => now;
+  try {
+    G.checkComposerPresent('1');
+    now += 4000; G.checkComposerPresent('1');
+    assert.equal(env.toasts.length, 0);
+    now += 1500; G.checkComposerPresent('1');
+    now += 1500; G.checkComposerPresent('1');
+    assert.deepEqual(env.toasts, ['입력창을 찾지 못해 번역 전송이 동작하지 않습니다. 화면 구조가 바뀌었을 수 있습니다']);
+    env.hasComposer = true; G.checkComposerPresent('1');
+    env.hasComposer = false; G.checkComposerPresent('1'); now += 6000; G.checkComposerPresent('1');
+    assert.equal(env.toasts.length, 1); // 같은 대화에서는 다시 알리지 않는다
+  } finally { Date.now = realNow; }
 });

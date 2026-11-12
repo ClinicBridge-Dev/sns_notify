@@ -176,7 +176,7 @@
   }
 
   root.util = {
-    send, connected: function () { return !!port; }, onMessage,
+    send, connected: function () { return !!port; }, alive: alive, onMessage,
     settings: function () { return settings; },
     role: function () { return role; },
     host, toast, onInboxChange,
