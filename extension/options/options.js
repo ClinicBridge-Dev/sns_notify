@@ -194,8 +194,12 @@
     setMsg($('qr-io-msg'), '');
     let parsed;
     try {
-      parsed = JSON.parse(await file.text());
+      const text = await file.text();
+      // 같은 파일을 고쳐서 다시 고를 수 있도록 읽자마자 비운다(성공·실패 모두).
+      $('qr-import-file').value = '';
+      parsed = JSON.parse(text);
     } catch (e) {
+      $('qr-import-file').value = '';
       showImportFailure('JSON으로 읽을 수 없는 파일입니다.', [{ index: -1, reason: 'JSON 문법이 올바르지 않습니다' }]);
       return;
     }

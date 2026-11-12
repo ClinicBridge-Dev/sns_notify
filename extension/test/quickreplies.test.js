@@ -46,3 +46,19 @@ test('accepted items are normalized to id/title/text/tags', () => {
   const r = Q.validateImport([{ title: 't', text: 'x', extra: 1 }]);
   assert.deepEqual(r.items, [{ id: undefined, title: 't', text: 'x', tags: [] }]);
 });
+
+test('rejects wrapped object whose version is not 1', () => {
+  const r = Q.validateImport({ version: 2, items: [item()] });
+  assert.equal(r.ok, false);
+  assert.equal(r.errors[0].index, -1);
+  assert.equal(Q.validateImport({ items: [item()] }).ok, false);
+});
+
+test('duplicate ids inside one import get fresh ids', () => {
+  let n = 0;
+  const r = Q.mergeImport([], [item({ id: 'x' }), item({ id: 'x', title: '둘' }), item({ id: undefined })], 'replace', () => 'n' + (++n));
+  assert.deepEqual(r.items.map(i => i.id), ['x', 'n1', 'n2']);
+  const m = Q.mergeImport([item({ id: 'x' })], [item({ id: 'y' }), item({ id: 'y' })], 'merge', () => 'n9');
+  assert.deepEqual(m.items.map(i => i.id), ['x', 'y', 'n9']);
+  assert.equal(m.added, 2);
+});

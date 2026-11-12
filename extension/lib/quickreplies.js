@@ -32,7 +32,10 @@
   function validateImport(parsed) {
     let list = null;
     if (Array.isArray(parsed)) list = parsed;
-    else if (parsed && typeof parsed === 'object' && Array.isArray(parsed.items)) list = parsed.items;
+    else if (parsed && typeof parsed === 'object' && Array.isArray(parsed.items)) {
+      if (parsed.version !== 1) return { ok: false, errors: [{ index: -1, reason: 'version이 1이 아닙니다(지원하는 형식은 version 1뿐입니다)' }] };
+      list = parsed.items;
+    }
     if (!list) return { ok: false, errors: [{ index: -1, reason: '{"version":1,"items":[...]} 또는 항목 배열이 아닙니다' }] };
     if (list.length > MAX_ITEMS) return { ok: false, errors: [{ index: -1, reason: '항목이 ' + MAX_ITEMS + '개를 넘습니다(' + list.length + '개)' }] };
     const errors = [];
@@ -46,8 +49,12 @@
 
   // existing은 저장된 항목(id 있음), incoming은 validateImport를 통과한 항목.
   function mergeImport(existing, incoming, mode, newId) {
+    // 가져온 목록 안에서 id가 겹치면 뒤쪽 항목에 새 id를 준다(수정·삭제가 둘 다에 걸리지 않게).
+    const seen = new Set();
     const withId = incoming.map(function (it) {
-      return Object.assign({}, it, { id: it.id || newId() });
+      const id = it.id && !seen.has(it.id) ? it.id : newId();
+      seen.add(id);
+      return Object.assign({}, it, { id: id });
     });
     if (mode === 'replace') return { items: withId, added: withId.length, changed: 0 };
     const items = existing.slice();
