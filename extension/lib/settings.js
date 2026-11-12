@@ -44,6 +44,17 @@
     return false;
   }
 
+  // 빈 문자열은 "설정 안 함"이므로 허용한다. 그 외에는 host 권한이 있는 Slack 주소만 받는다.
+  function validateWebhookUrl(url) {
+    if (url === '') return { ok: true };
+    if (typeof url !== 'string' || url.indexOf('https://hooks.slack.com/') !== 0) {
+      return { ok: false, reason: 'https://hooks.slack.com/ 으로 시작하는 주소만 쓸 수 있습니다' };
+    }
+    if (url.slice('https://hooks.slack.com/'.length).length === 0) return { ok: false, reason: '주소가 완전하지 않습니다' };
+    return { ok: true };
+  }
+
+  root.validateWebhookUrl = validateWebhookUrl;
   root.DEFAULT_SETTINGS = DEFAULT_SETTINGS;
   root.SECRET_KEYS = SECRET_KEYS;
   root.publicSettings = publicSettings;

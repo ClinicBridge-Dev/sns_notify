@@ -37,3 +37,15 @@ test('classifySender: lookalike host and missing id are rejected', () => {
   assert.equal(S.classifySender({ id: EXT, tab: { id: 1, url: 'https://business.facebook.com.evil.com/latest/inbox' } }, EXT), 'reject');
   assert.equal(S.classifySender({ tab: { id: 1, url: 'https://business.facebook.com/latest/inbox' } }, EXT), 'reject');
 });
+
+test('validateWebhookUrl accepts only Slack webhook hosts', () => {
+  assert.equal(S.validateWebhookUrl('').ok, true);
+  assert.equal(S.validateWebhookUrl('https://hooks.slack.com/services/T/B/x').ok, true);
+  assert.equal(S.validateWebhookUrl('https://example.com/hook').ok, false);
+  assert.equal(S.validateWebhookUrl('http://hooks.slack.com/services/T/B/x').ok, false);
+});
+
+test('validateWebhookUrl rejects lookalike hosts', () => {
+  assert.equal(S.validateWebhookUrl('https://hooks.slack.com.evil.com/x').ok, false);
+  assert.equal(S.validateWebhookUrl('https://hooks.slack.com@evil.com/x').ok, false);
+});

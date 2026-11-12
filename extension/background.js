@@ -58,6 +58,12 @@ handlers.GET_PUBLIC_SETTINGS = async function () {
   return MBX.publicSettings(Object.assign({}, MBX.DEFAULT_SETTINGS, settings));
 };
 
+handlers.GET_QUICK_REPLIES = async function () {
+  const { quickReplies } = await loadState(['quickReplies']);
+  const qr = quickReplies || {};
+  return { version: 1, items: Array.isArray(qr.items) ? qr.items : [] };
+};
+
 handlers.OPEN_OPTIONS = async function () {
   chrome.runtime.openOptionsPage();
 };

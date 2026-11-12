@@ -2,3 +2,25 @@ body { font: 14px/1.5 system-ui, sans-serif; max-width: 720px; margin: 24px auto
 h1 { font-size: 20px; }
 section { border: 1px solid #dddfe2; border-radius: 8px; padding: 8px 16px; margin: 12px 0; }
 h2 { font-size: 15px; margin: 8px 0; }
+h3 { font-size: 13px; margin: 8px 0 4px; }
+label { display: block; margin: 6px 0; }
+label.inline { display: flex; gap: 6px; align-items: center; }
+input:not([type=checkbox]):not([type=radio]), textarea, select { display: block; width: 100%; box-sizing: border-box; padding: 4px 6px; font: inherit; }
+input[type=number] { width: 8em; }
+.row { display: flex; gap: 8px; align-items: center; margin: 8px 0; flex-wrap: wrap; }
+.row input { flex: 1; min-width: 200px; }
+.hint { color: #606770; font-size: 12px; }
+.msg { font-size: 12px; min-height: 1em; margin: 4px 0; }
+.msg.error, .errors { color: #b3261e; }
+.warn { background: #fff4e5; border: 1px solid #f0b429; border-radius: 4px; padding: 6px 8px; font-size: 12px; }
+.panel { border: 1px dashed #bcc0c4; border-radius: 6px; padding: 8px 12px; margin: 8px 0; }
+.qr-list { list-style: none; padding: 0; margin: 8px 0; }
+.qr-list li { display: flex; gap: 8px; align-items: center; border-bottom: 1px solid #eee; padding: 6px 0; }
+.qr-list .qr-body { flex: 1; min-width: 0; }
+.qr-list .qr-title { font-weight: 600; }
+.qr-list .qr-preview { color: #606770; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.qr-form { border-top: 1px solid #eee; margin-top: 8px; }
+.status { display: grid; grid-template-columns: 12em 1fr; gap: 4px 8px; margin: 4px 0; }
+.status dt { color: #606770; }
+.status dd { margin: 0; }
+[hidden] { display: none !important; }

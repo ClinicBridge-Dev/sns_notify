@@ -7,16 +7,138 @@
 </head>
 <body>
   <h1>Meta Inbox Helper 설정</h1>
-  <section id="sec-quick-replies"><h2>빠른 메시지</h2></section>
-  <section id="sec-slack"><h2>Slack</h2></section>
-  <section id="sec-slack-connect"><h2>Slack 연결</h2></section>
-  <section id="sec-account"><h2>알림 대상 계정</h2></section>
-  <section id="sec-deepl"><h2>DeepL</h2></section>
-  <section id="sec-translate"><h2>번역</h2></section>
-  <section id="sec-status"><h2>상태</h2></section>
-  <section id="sec-guide"><h2>안내</h2></section>
+
+  <section id="sec-quick-replies">
+    <h2>빠른 메시지</h2>
+    <p class="hint">저장하면 바로 반영됩니다. 제목 50자, 본문 2000자, 최대 500개.</p>
+    <ul id="qr-list" class="qr-list"></ul>
+    <p id="qr-empty" class="hint" hidden>등록된 빠른 메시지가 없습니다.</p>
+    <form id="qr-form" class="qr-form" autocomplete="off">
+      <h3 id="qr-form-title">새 빠른 메시지</h3>
+      <label>제목 <input id="qr-title" maxlength="50" required></label>
+      <label>본문 <textarea id="qr-text" rows="4" maxlength="2000" required></textarea></label>
+      <label>태그 (쉼표로 구분) <input id="qr-tags"></label>
+      <div class="row">
+        <button type="submit" id="qr-save">추가</button>
+        <button type="button" id="qr-cancel" hidden>수정 취소</button>
+      </div>
+      <p id="qr-form-msg" class="msg" role="status"></p>
+    </form>
+    <div class="row">
+      <button type="button" id="qr-export">내보내기</button>
+      <button type="button" id="qr-import-btn">가져오기</button>
+      <input type="file" id="qr-import-file" accept=".json,application/json" hidden>
+    </div>
+    <div id="qr-import-panel" class="panel" hidden>
+      <p id="qr-import-summary"></p>
+      <ul id="qr-import-errors" class="errors"></ul>
+      <div id="qr-import-choice" hidden>
+        <label><input type="radio" name="qr-mode" value="merge" checked> 합치기 (id가 같으면 덮어쓰고, 없으면 추가)</label>
+        <label><input type="radio" name="qr-mode" value="replace"> 전체 교체</label>
+        <p id="qr-import-counts"></p>
+        <div class="row">
+          <button type="button" id="qr-import-apply">적용</button>
+          <button type="button" id="qr-import-cancel">취소</button>
+        </div>
+      </div>
+    </div>
+    <p id="qr-io-msg" class="msg" role="status"></p>
+  </section>
+
+  <section id="sec-slack">
+    <h2>Slack</h2>
+    <label class="inline"><input type="checkbox" id="slackEnabled"> Slack 알림 사용</label>
+    <label>미리보기 길이 (자) <input type="number" id="slackPreviewMaxLen" min="1" max="1000" step="1"></label>
+    <label class="inline"><input type="checkbox" id="slackMaskPhone"> 전화번호 가리기</label>
+  </section>
+
+  <section id="sec-slack-connect">
+    <h2>Slack 연결</h2>
+    <div id="webhook-masked" class="row" hidden>
+      <code id="webhook-masked-text"></code>
+      <button type="button" id="webhook-change">변경</button>
+    </div>
+    <form id="webhook-form" class="row" autocomplete="off">
+      <input type="password" id="webhook-input" placeholder="https://hooks.slack.com/services/..." autocomplete="off">
+      <button type="submit">저장</button>
+    </form>
+    <p id="webhook-msg" class="msg" role="status"></p>
+    <div class="row">
+      <button type="button" id="btn-test-slack" disabled title="추후 연결됩니다">테스트 메시지 보내기</button>
+      <span id="test-slack-result" class="msg"></span>
+    </div>
+  </section>
+
+  <section id="sec-account">
+    <h2>알림 대상 계정</h2>
+    <label>계정 이름 (Slack 메시지에 표시) <input id="accountName" maxlength="100"></label>
+    <div class="row">
+      <button type="button" id="btn-set-asset" disabled title="추후 연결됩니다">현재 수신함을 알림 대상으로 지정</button>
+      <span id="asset-result" class="msg"></span>
+    </div>
+    <p>지정된 값: <code id="asset-current">(없음)</code></p>
+  </section>
+
+  <section id="sec-deepl">
+    <h2>DeepL</h2>
+    <div id="deepl-masked" class="row" hidden>
+      <code id="deepl-masked-text"></code>
+      <button type="button" id="deepl-change">변경</button>
+    </div>
+    <form id="deepl-form" class="row" autocomplete="off">
+      <input type="password" id="deepl-input" placeholder="DeepL API 키" autocomplete="off">
+      <button type="submit">저장</button>
+    </form>
+    <p id="deepl-free-warning" class="warn" hidden>무료 DeepL 키(:fx)입니다. 상담 내용이 의료 정보에 해당하면 DeepL로의 전송은 처리 위탁, 국외 이전 검토 대상일 수 있습니다. 유료 API 요금제는 텍스트를 저장하지 않고 학습에 쓰지 않는다고 명시하므로 유료 요금제를 권장합니다.</p>
+    <p id="deepl-msg" class="msg" role="status"></p>
+    <div class="row">
+      <button type="button" id="btn-check-deepl" disabled title="추후 연결됩니다">키 확인</button>
+      <span id="deepl-check-result" class="msg"></span>
+    </div>
+  </section>
+
+  <section id="sec-translate">
+    <h2>번역</h2>
+    <label class="inline"><input type="checkbox" id="bubbleButtonsEnabled"> 말풍선 번역·복사 버튼 사용</label>
+    <label class="inline"><input type="checkbox" id="sendTranslateEnabled"> 한글 입력을 번역해 전송</label>
+    <label class="inline"><input type="checkbox" id="quickRepliesEnabled"> 빠른 메시지 버튼 사용</label>
+    <label>말풍선 번역 기본 언어 <select id="bubbleTargetLang"></select></label>
+    <label>전송 번역 기본 대상 언어 <select id="sendTargetLang"></select></label>
+  </section>
+
+  <section id="sec-status">
+    <h2>상태</h2>
+    <dl id="status-list" class="status">
+      <dt>마지막 감지 신호</dt><dd id="status-heartbeat">-</dd>
+      <dt>마지막 Slack 전송 결과</dt><dd id="status-slack">-</dd>
+      <dt>대기열 건수</dt><dd id="status-queue">-</dd>
+      <dt>최근 오류</dt><dd id="status-error">-</dd>
+    </dl>
+  </section>
+
+  <section id="sec-guide">
+    <h2>안내</h2>
+    <h3>운영 안내</h3>
+    <ul>
+      <li>수신함 탭을 닫지 않습니다. 상담하던 탭에서 광고 관리 등 수신함 밖으로 이동하면 감지가 멈춥니다. 다른 화면은 새 탭에서 엽니다.</li>
+      <li>두 채널 모두 발신자와 미리보기를 받고 싶으면 Instagram 탭과 WhatsApp 탭을 하나씩 열어 둡니다.</li>
+      <li>브라우저의 탭 절전(메모리 절약) 대상에서 business.facebook.com을 제외합니다.</li>
+    </ul>
+    <h3>알려진 한계</h3>
+    <ul>
+      <li>브라우저가 완전히 꺼지면 감지가 중단되어도 경고를 보낼 수 없습니다.</li>
+      <li>Slack 알림은 탭이 열려 있고 화면이 갱신되는 동안에만 동작합니다. 모든 메시지를 한 건씩 보장하지 않으며, 연속 메시지는 1건으로 합쳐질 수 있습니다.</li>
+      <li>이 확장 프로그램은 Meta가 승인한 연동 방식이 아닙니다. 계정 제한 위험이 없다고 보장할 수 없습니다.</li>
+      <li>번역 품질은 DeepL에 달려 있습니다. 한글 입력 번역은 확인 단계 없이 전송되므로 오역이 고객에게 그대로 전달될 수 있습니다.</li>
+      <li>Slack Webhook 주소와 DeepL 키는 확장 프로그램 저장소에 평문으로 저장됩니다. 확장 프로그램과 브라우저 프로필을 다른 사람과 공유하지 않습니다.</li>
+      <li>채널 탭 전환, 검색, 필터 직후 몇 초 동안 온 메시지는 발신자와 미리보기 없이 건수 알림으로만 옵니다.</li>
+      <li>한글 조합 처리는 운영체제와 입력기에 따라 다르게 동작할 수 있습니다. 검증한 환경에서만 사용합니다.</li>
+    </ul>
+  </section>
+
   <script src="../lib/constants.js"></script>
   <script src="../lib/settings.js"></script>
+  <script src="../lib/quickreplies.js"></script>
   <script src="options.js"></script>
 </body>
 </html>
