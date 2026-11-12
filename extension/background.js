@@ -46,7 +46,8 @@ async function ensureDefaults() {
 
 try {
   // content script가 저장소를 읽지 못하게 한다(비밀값 보호).
-  chrome.storage.local.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' });
+  chrome.storage.local.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' })
+    .catch(function () { console.debug('setAccessLevel rejected'); });
 } catch (e) {
   console.debug('setAccessLevel failed');
 }
