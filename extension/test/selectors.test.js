@@ -48,3 +48,19 @@ test('channelFromPath requires a path boundary', () => {
   assert.equal(sel.channelFromPath('/latest/inbox'), 'other');
   assert.equal(sel.channelFromPath('/latest/inbox/wec/x'), 'wec');
 });
+
+test('list state helpers are safe without a document', () => {
+  assert.equal(sel.filterState(), '');
+  assert.equal(sel.listScrollTop(), 0);
+  assert.equal(sel.isListOrThreadMenu(null), false);
+});
+
+test('joinFilterState is stable and drops empties', () => {
+  assert.equal(sel.joinFilterState(['q:a', '', 'on:Unread', null]), 'on:Unread|q:a');
+  assert.equal(sel.joinFilterState(['on:Unread', 'q:a']), sel.joinFilterState(['q:a', 'on:Unread']));
+  assert.equal(sel.joinFilterState(undefined), '');
+});
+
+test('HIDDEN_TAB_DOUBLE_OBSERVE constant is on', () => {
+  assert.equal(require('../lib/constants.js').HIDDEN_TAB_DOUBLE_OBSERVE, true);
+});

@@ -85,16 +85,61 @@
     return out;
   }
 
-  function listScrollTop() {
+  // 스크롤 가능한 목록 요소: 목록 컨테이너 또는 가장 가까운 스크롤 조상. 못 찾으면 null.
+  function listScroller() {
     const c = listContainer();
     if (!c || typeof getComputedStyle === 'undefined') return null;
     let el = c;
     while (el && el !== document.documentElement) {
       const oy = getComputedStyle(el).overflowY;
-      if ((oy === 'auto' || oy === 'scroll') && el.scrollHeight > el.clientHeight) return el.scrollTop;
+      if ((oy === 'auto' || oy === 'scroll') && el.scrollHeight > el.clientHeight) return el;
       el = el.parentElement;
     }
-    return 0;
+    return null;
+  }
+
+  // U12 미확인 (가상화): 대상 요소는 목록 컨테이너 또는 가장 가까운 스크롤 조상으로 가정. 못 찾으면 0.
+  function listScrollTop() {
+    const el = listScroller();
+    return el ? el.scrollTop : 0;
+  }
+
+  // 순수 함수: 필터 조건 조각을 안정적인 문자열로 합친다(빈 조각 제거, 정렬).
+  function joinFilterState(parts) {
+    return (Array.isArray(parts) ? parts : [])
+      .filter(function (p) { return typeof p === 'string' && p !== ''; })
+      .sort().join('|');
+  }
+
+  // U11 미확인: 필터 컨트롤(Unread, Ad replies, Follow up, Filters)이 aria-pressed/selected/checked 로 켜짐을 나타낸다고 가정.
+  // 목록 컨테이너 가까운 조상(최대 3단계) 안에서 켜진 컨트롤의 라벨과 검색어를 합친다. 아무것도 없으면 ''.
+  function filterState() {
+    if (typeof document === 'undefined') return '';
+    const parts = [];
+    const c = listContainer();
+    let scope = c;
+    for (let i = 0; scope && scope.parentElement && i < 3; i++) scope = scope.parentElement;
+    if (scope) {
+      const on = scope.querySelectorAll('[aria-pressed="true"],[aria-selected="true"],[aria-checked="true"]');
+      on.forEach(function (el) {
+        if (el.closest('[role="tablist"]')) return; // 채널 탭 전환은 필터가 아니다
+        if (c && c.contains(el)) return; // 목록 항목 선택 상태 제외
+        const label = (el.getAttribute('aria-label') || el.textContent || '').trim().slice(0, 40);
+        parts.push('on:' + label);
+      });
+    }
+    const q = searchValue();
+    if (q) parts.push('q:' + q.trim());
+    return joinFilterState(parts);
+  }
+
+  // U11 미확인: "읽지 않음으로 표시" 메뉴 위치 미확인이라 목록 영역 클릭과 menu/menuitem 클릭을 모두 사용자 조작으로 본다.
+  function isListOrThreadMenu(target) {
+    let el = target && target.nodeType === 3 ? target.parentElement : target;
+    if (!el || !el.closest) return false;
+    if (el.closest('[role="menu"],[role="menuitem"]')) return true;
+    const c = listContainer();
+    return !!c && c.contains(el);
   }
 
   function messageRegion() {
@@ -180,7 +225,7 @@
 
   root.sel = {
     assetIdFrom, threadIdFrom, channelFromPath, parseBadgeText, labelMatches,
-    channelTabs, badgeOf, listContainer, listItems, listScrollTop, messageRegion,
+    channelTabs, badgeOf, listContainer, listItems, listScrollTop, filterState, joinFilterState, isListOrThreadMenu, messageRegion,
     bubbleFrom, bubbleTextEl, composer, submitButton, isSubmitButton, searchValue, dialogOpen
   };
 })(typeof module !== 'undefined' && module.exports ? module.exports : (self.MBX = self.MBX || {}));

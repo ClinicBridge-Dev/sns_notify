@@ -26,7 +26,8 @@
     THREAD_LANG_RETRY_MS: 500,
     QUICK_REPLY_MAX_ITEMS: 500,
     QUICK_REPLY_MAX_TITLE: 50,
-    QUICK_REPLY_MAX_TEXT: 2000
+    QUICK_REPLY_MAX_TEXT: 2000,
+    HIDDEN_TAB_DOUBLE_OBSERVE: true // 가려진 탭: 연속 두 번의 관찰에서 동일할 때만 후보(Task 9, U12 미확인)
   };
   // 번역 대상 언어(기획서 5장). background 검증, options, composer가 함께 쓴다.
   const SEND_LANGS = [
