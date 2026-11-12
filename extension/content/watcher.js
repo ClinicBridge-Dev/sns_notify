@@ -16,6 +16,8 @@
   const SCROLL_DELAY_MS = 150;   // 스크롤·입력·클릭 모음
   const NOTICE_OTHER = '알림 대상 계정이 아닙니다';
   const NOTICE_UNSET = '설정에서 알림 대상 계정을 지정하세요';
+  const NOTICE_SELECTOR = '수신함 화면 요소를 찾지 못해 Slack 알림 감지가 멈췄습니다';
+  const NOTICE_NO_ASSET = '계정 정보(asset_id)를 읽지 못해 Slack 알림 감지가 멈췄습니다';
 
   let started = false;
   let settle = null;              // { phase: 'load'|'change'|'ready', lastChange }
@@ -71,7 +73,7 @@
     const h = util.host();
     const style = document.createElement('style');
     style.textContent =
-      '.mbx-wnotice{position:fixed;left:16px;bottom:16px;z-index:2147483000;display:none;align-items:center;gap:8px;' +
+      '.mbx-wnotice{position:fixed;left:16px;bottom:16px;z-index:1;display:none;align-items:center;gap:8px;' +
       'max-width:320px;padding:6px 10px;border:1px solid #e0c36a;border-radius:6px;background:#fff8dc;color:#333;' +
       'font:12px/1.4 system-ui,sans-serif;box-shadow:0 1px 4px rgba(0,0,0,.15)}' +
       '.mbx-wnotice button{font:inherit;padding:2px 8px;border:1px solid #bbb;border-radius:4px;background:#fff;color:#222;cursor:pointer}';
@@ -91,10 +93,13 @@
     return { box: box, text: text, btn: btn };
   }
 
+  const NOTICE_TEXT = { other: NOTICE_OTHER, unset: NOTICE_UNSET, selector: NOTICE_SELECTOR, no_asset_id: NOTICE_NO_ASSET };
+
+  // Meta의 대화상자가 열려 있으면 숨긴다(기획서 12장).
   function showNotice(kind) {
-    if (!kind) { if (notice) notice.box.style.display = 'none'; return; }
+    if (!kind || sel.dialogOpen()) { if (notice) notice.box.style.display = 'none'; return; }
     if (!notice) notice = buildNotice();
-    notice.text.textContent = kind === 'unset' ? NOTICE_UNSET : NOTICE_OTHER;
+    notice.text.textContent = NOTICE_TEXT[kind] || '';
     notice.btn.style.display = kind === 'unset' ? '' : 'none';
     notice.box.style.display = 'flex';
   }
@@ -193,12 +198,15 @@
   // 실패가 60초를 넘은 순간 즉시 알린다(이후는 30초 생존 신호에 실린다).
   function checkFailure() {
     failTimer = null;
-    const now = Date.now();
-    updateHealth(now);
-    if (failingLongEnough(now) && !failReported) heartbeat();
+    observe(); // 화면 안내 갱신
+    if (failingLongEnough(Date.now()) && !failReported) heartbeat();
   }
 
   function heartbeat() {
+    try { heartbeatOnce(); } catch (e) { console.debug('watcher heartbeat error'); }
+  }
+
+  function heartbeatOnce() {
     if (!started || !isOwner()) return;
     const now = Date.now();
     const h = updateHealth(now);
@@ -272,7 +280,12 @@
   }
 
   // ---- 관찰 한 번 ----
+  // 한 기능의 오류가 다른 기능을 멈추지 않게 분리한다(기획서 12장).
   function observe() {
+    try { observeOnce(); } catch (e) { console.debug('watcher observe error'); }
+  }
+
+  function observeOnce() {
     if (!started) return;
     const now = Date.now();
     attach();
@@ -288,7 +301,9 @@
     if (!inInbox()) { showNotice(null); account = 'unknown'; clearListWork(); return; }
 
     const acc = accountState();
-    showNotice(acc === 'other' || acc === 'unset' ? acc : null);
+    // 요소를 못 찾은 상태가 60초 넘게 이어지면 화면에도 알린다(담당 여부와 관계없이).
+    const longFail = failingLongEnough(now) && (h.reason === 'selector' || h.reason === 'no_asset_id') ? h.reason : null;
+    showNotice(acc === 'other' || acc === 'unset' ? acc : longFail);
     if (acc !== 'match') {
       if (account === 'match') clearListWork();
       account = acc;
@@ -342,11 +357,13 @@
       return;
     }
     if (settle.phase !== 'ready') return;
-    if (!listDirty && !confirmDue) return;
+    if (!listDirty && !confirmDue) { debounceDue = false; return; }
     if (visible()) {
       if (changed || !debounceTimer) { if (!debounceDue) scheduleDebounce(); }
       if (!debounceDue) return;
     }
+    // 가려진 탭에서 바로 판단하면 남아 있던 디바운스 타이머를 지운다(나중에 울려 다음 판단을 앞당기지 않게).
+    clearTimeout(debounceTimer); debounceTimer = null;
     debounceDue = false; confirmDue = false; listDirty = false;
     evaluate(items, now);
   }
