@@ -185,10 +185,16 @@ async function readFullSettings() {
 function readTabs(v) { return Array.isArray(v) ? v.filter(function (t) { return t && typeof t.tabId === 'number'; }) : []; }
 
 // 이하 tabsSeen·담당 함수는 모두 직렬 큐 안에서 부른다.
-async function touchTab(tabId, assetId, path, now) {
+// alive 가 false(실패 신호)면 계정·경로만 갱신하고 lastSeen 은 그대로 둔다(처음 보는 탭이면 now).
+// 담당 유지 기준인 "생존 신호"는 정상 신호와 HELLO 뿐이다. 실패 신호로 lastSeen 을 갱신하면
+// 실패 중인 담당이 90초 초과로 물러나지 않아 정상인 대기 탭으로 넘어가지 못한다.
+async function touchTab(tabId, assetId, path, now, alive) {
   const { tabsSeen } = await loadState(['tabsSeen']);
-  const tabs = readTabs(tabsSeen).filter(function (t) { return t.tabId !== tabId; });
-  tabs.push({ tabId: tabId, assetId: assetId, path: path, lastSeen: now });
+  const all = readTabs(tabsSeen);
+  const prev = all.find(function (t) { return t.tabId === tabId; });
+  const tabs = all.filter(function (t) { return t.tabId !== tabId; });
+  const lastSeen = alive === false && prev ? (prev.lastSeen || 0) : now;
+  tabs.push({ tabId: tabId, assetId: assetId, path: path, lastSeen: lastSeen });
   await saveState({ tabsSeen: tabs });
 }
 
@@ -393,7 +399,7 @@ handlers.HEARTBEAT = async function (msg, sender) {
     return { ok: false, code: 'REJECTED' };
   }
   const now = Date.now();
-  await touchTab(tabId, msg.asset_id, msg.path, now);
+  await touchTab(tabId, msg.asset_id, msg.path, now, msg.ok);
   const owner = await recomputeOwner(now);
   const full = await readFullSettings();
   if (!targetOf(full)) return { ok: true };
