@@ -8,12 +8,7 @@
   const POLL_MS = 50;
   const TICK_MS = 300;
 
-  // DeepL 언어 코드(기획서 5장). 표시 이름은 안내용이다.
-  const LANGS = [
-    ['EN-US', '영어(미국)'], ['EN-GB', '영어(영국)'], ['ZH-HANS', '중국어(간체)'], ['ZH-HANT', '중국어(번체)'],
-    ['JA', '일본어'], ['ES', '스페인어'], ['FR', '프랑스어'], ['DE', '독일어'], ['RU', '러시아어'],
-    ['VI', '베트남어'], ['TH', '태국어'], ['ID', '인도네시아어'], ['AR', '아랍어'], ['PT-BR', '포르투갈어(브라질)']
-  ];
+  const LANGS = root.SEND_LANGS;
 
   // ================= 입력창 접근 =================
   function normalize(s) {
@@ -77,18 +72,22 @@
     try { return document.execCommand('insertText', false, t); } catch (e) { return false; }
   }
 
-  // 500ms 안에 입력창에 반영됐는지 본다.
-  function reflected(replaceAll, before, want) {
-    const now = normalize(text());
+  // 500ms 안에 입력창에 반영됐는지 본다. before0 는 넣기 전에 한 번만 잡은 값이다.
+  function isReflected(replaceAll, before0, now, want) {
     if (replaceAll) return now === want;
-    return now !== before && now.indexOf(want) >= 0;
+    return now !== before0 && now.indexOf(want) >= 0;
   }
 
-  function waitReflected(replaceAll, before, want) {
+  // 다음 방법을 쓰기 전의 판단. 앞 방법이 늦게 반영됐다면 'done'(두 번 넣지 않는다), 아니면 'next'.
+  function decideFallback(replaceAll, before0, now, want) {
+    return isReflected(replaceAll, before0, now, want) ? 'done' : 'next';
+  }
+
+  function waitReflected(replaceAll, before0, want) {
     return new Promise(function (resolve) {
       const t0 = Date.now();
       const check = function () {
-        if (reflected(replaceAll, before, want)) { resolve(true); return; }
+        if (isReflected(replaceAll, before0, normalize(text()), want)) { resolve(true); return; }
         if (Date.now() - t0 >= INSERT_VERIFY_MS) { resolve(false); return; }
         setTimeout(check, POLL_MS);
       };
@@ -100,18 +99,19 @@
   // replaceAll: 전체 선택 → 한 프레임 대기(8-5 교체 2번) → 넣기. 아니면 현재 커서 위치에 넣는다.
   async function insertText(t, opts) {
     const el = sel.composer();
-    if (!el || typeof t !== 'string' || t === '') return false;
+    if (!el || typeof t !== 'string' || t.trim() === '') return false;
     const replaceAll = !!(opts && opts.replaceAll);
     const want = normalize(t);
+    const before0 = normalize(text());
     const methods = [pasteText, execInsert];
     for (let i = 0; i < methods.length; i++) {
-      const cur = sel.composer();
-      if (cur !== el) return false; // 도중에 입력창이 바뀜
+      if (sel.composer() !== el) return false; // 도중에 입력창이 바뀜
+      // 앞 방법이 500ms 뒤에 반영됐을 수 있다. 그 위에 다시 넣지 않는다.
+      if (i > 0 && decideFallback(replaceAll, before0, normalize(text()), want) === 'done') return true;
       el.focus();
       if (replaceAll) { selectAll(el); await nextFrame(); } else { restoreCaret(el); }
-      const before = normalize(text());
       methods[i](el, t);
-      if (await waitReflected(replaceAll, before, want)) return true;
+      if (await waitReflected(replaceAll, before0, want)) return true;
     }
     return false;
   }
@@ -348,6 +348,7 @@
     ui.bar.style.left = Math.max(4, r.left) + 'px';
     ui.bar.style.bottom = Math.max(0, window.innerHeight - r.top + 6) + 'px';
     ui.quickBtn.style.display = s.quickRepliesEnabled === false ? 'none' : '';
+    if (s.quickRepliesEnabled === false) ui.qpanel.classList.remove('mbx-open');
     const cur = currentLang();
     ui.langBtn.textContent = '번역: ' + (cur === null ? '…' : cur === 'OFF' ? '끔' : cur) + ' ▾';
     ui.langBtn.disabled = cur === null;
@@ -399,6 +400,8 @@
     text: text,
     // Task 13(전송 가로채기)이 같은 규칙으로 쓰는 도구
     _normalize: normalize,
+    _decideFallback: decideFallback,
+    _isReflected: isReflected,
     _selectAll: selectAll
   };
 

@@ -70,7 +70,7 @@ handlers.GET_QUICK_REPLIES = async function () {
 
 // 대화별 번역 언어. 직렬 큐 안에서 읽고 쓴다. 응답에 threadId를 함께 돌려준다(content가 현재 대화와 비교한다).
 handlers.SET_THREAD_LANG = async function (msg) {
-  if (typeof msg.threadId !== 'string' || !msg.threadId || typeof msg.lang !== 'string' || !msg.lang) {
+  if (typeof msg.threadId !== 'string' || !msg.threadId || !MBX.isValidThreadLang(msg.lang)) {
     return { ok: false, code: 'REJECTED' };
   }
   const { threadLangs } = await loadState(['threadLangs']);

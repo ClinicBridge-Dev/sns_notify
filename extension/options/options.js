@@ -3,11 +3,7 @@
   const MBX = self.MBX;
   const $ = function (id) { return document.getElementById(id); };
 
-  const SEND_LANGS = [
-    ['EN-US', '영어 (미국)'], ['EN-GB', '영어 (영국)'], ['ZH-HANS', '중국어 (간체)'], ['ZH-HANT', '중국어 (번체)'],
-    ['JA', '일본어'], ['ES', '스페인어'], ['FR', '프랑스어'], ['DE', '독일어'], ['RU', '러시아어'],
-    ['VI', '베트남어'], ['TH', '태국어'], ['ID', '인도네시아어'], ['AR', '아랍어'], ['PT-BR', '포르투갈어 (브라질)']
-  ];
+  const SEND_LANGS = MBX.SEND_LANGS;
   const BUBBLE_LANGS = [['KO', '한국어']].concat(SEND_LANGS);
 
   async function loadSettings() {
