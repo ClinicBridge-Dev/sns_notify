@@ -40,3 +40,9 @@ test('watchdog keeps other watcherState fields', () => {
   assert.deepEqual(W.watchdogTick(base, '42', 4 * MIN).ws.channels, { wec: { base: 1 } });
   assert.equal(W.onHeartbeat(base, 4 * MIN).ws.ownerTabId, 7);
 });
+
+// Fix round 1: 원인별 실패 경고가 나가 있으면 일반 중단 경고는 보내지 않는다(한 원인, 한 경고).
+test('no generic stopped alert while a reason-specific failure alert is active', () => {
+  assert.equal(W.watchdogTick(ws({ lastAlarmAt: 3 * MIN, failAlerts: ['selector'] }), '42', 4 * MIN).alert, null);
+  assert.equal(W.watchdogTick(ws({ lastAlarmAt: 3 * MIN, failAlerts: [] }), '42', 4 * MIN).alert, 'stopped');
+});

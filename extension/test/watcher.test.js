@@ -282,3 +282,24 @@ test('tab that cannot read asset_id (never owner) reports no_asset_id after 60s'
   assert.equal(hbs.length, 1);
   assert.deepEqual([hbs[0].ok, hbs[0].reason, hbs[0].asset_id], [false, 'no_asset_id', '']);
 }));
+
+// Fix round 1: 안정화된 대기 탭이 담당을 이어받으면 첫 배지 보고는 initial:false(저장된 기준값과의 일반 비교).
+test('settled standby promoted to owner sends its first BADGE_STATE with initial:false', () => withEnv((e) => {
+  e.setRole('standby');
+  e.ready();
+  e.setRole('owner');
+  e.handlers.WATCHER_ROLE.forEach(f => f({ type: 'WATCHER_ROLE', role: 'owner' }));
+  const b = e.sent.filter(s => s.type === 'BADGE_STATE');
+  assert.equal(b.length, 1);
+  assert.equal(b[0].initial, false);
+}));
+
+test('owner from the start still sends initial:true after the load settle', () => withEnv((e) => {
+  e.handlers.WATCHER_ROLE.forEach(f => f({ type: 'WATCHER_ROLE', role: 'owner' })); // HELLO 응답(load 중)
+  e.setList([{ name: 'A', preview: 'a', time: '1:00 PM' }]); e.setSettings({ assetId: 'A1' });
+  e.handlers.SETTINGS_CHANGED.forEach(f => f());
+  e.advance(21000);
+  const b = e.sent.filter(s => s.type === 'BADGE_STATE');
+  assert.equal(b.length, 1);
+  assert.equal(b[0].initial, true);
+}));

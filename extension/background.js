@@ -226,7 +226,13 @@ async function recomputeOwner(now) {
   const live = new Set();
   ports.forEach(function (info) { if (info.tabId !== null) live.add(info.tabId); });
   const before = readTabs(st.tabsSeen);
-  let tabs = before.filter(function (t) { return live.has(t.tabId) || now - (t.lastSeen || 0) <= MBX.OWNER_TIMEOUT_MS; });
+  // HELLO 를 마친 port 인데 tabsSeen 에 없으면(시작 시 초기화와 순서가 엇갈린 경우) port 정보로 되살린다.
+  const restored = before.slice();
+  ports.forEach(function (info) {
+    if (info.tabId === null || !info.path || restored.some(function (t) { return t.tabId === info.tabId; })) return;
+    restored.push({ tabId: info.tabId, assetId: info.assetId, path: info.path, lastSeen: now });
+  });
+  let tabs = restored.filter(function (t) { return live.has(t.tabId) || now - (t.lastSeen || 0) <= MBX.OWNER_TIMEOUT_MS; });
   const prev = typeof ws.ownerTabId === 'number' ? ws.ownerTabId : null;
   const owner = MBX.chooseOwner(prev, tabs, targetOf(full), now, MBX.OWNER_TIMEOUT_MS);
   // 새 담당은 지금부터 시간을 센다(오래전 HELLO 시각 그대로면 다음 계산에서 곧바로 시간 초과가 된다).

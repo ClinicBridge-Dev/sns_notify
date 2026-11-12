@@ -106,10 +106,14 @@
     };
   }
 
-  // 수신함 경로에서만 연결한다. 같은 (asset_id, path)로는 다시 보내지 않는다.
+  // 수신함 경로에서만 새로 연결한다. 이미 연결된 탭이 수신함을 벗어나면 새 경로로 HELLO를 한 번 보내
+  // service worker가 감지 담당을 바로 넘기게 한다(기획서 6-1). 같은 (asset_id, path)로는 다시 보내지 않는다.
   function sendHello() {
-    if (sel.channelFromPath(location.pathname) === null) return;
-    connect();
+    if (sel.channelFromPath(location.pathname) === null) {
+      if (!port) return;
+    } else {
+      connect();
+    }
     if (!port) return;
     const info = currentInfo();
     const key = info.asset_id + '|' + info.path;
@@ -176,7 +180,7 @@
     settings: function () { return settings; },
     role: function () { return role; },
     host, toast, onInboxChange,
-    _test: { noticeShown: function () { return noticeShown; } }
+    _test: { noticeShown: function () { return noticeShown; }, sendHello: sendHello }
   };
 
   if (typeof document !== 'undefined' && root.sel) {

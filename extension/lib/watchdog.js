@@ -17,6 +17,8 @@
     if (now - prev >= CONSTS.SLEEP_GAP_MS) return { ws: next, alert: null };
     if (typeof assetId !== 'string' || !assetId.trim() || !next.everSeen) return { ws: next, alert: null };
     if (next.stoppedAlertSent) return { ws: next, alert: null };
+    // 원인별 실패 경고가 나가 있으면 같은 원인으로 일반 중단 경고를 또 보내지 않는다(재개 시 failAlerts 가 비워진다).
+    if (Array.isArray(next.failAlerts) && next.failAlerts.length) return { ws: next, alert: null };
     if (now - (next.lastHeartbeat || 0) > CONSTS.STOP_AFTER_MS) {
       next.stoppedAlertSent = true;
       return { ws: next, alert: 'stopped' };

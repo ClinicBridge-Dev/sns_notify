@@ -447,6 +447,9 @@
     util.onMessage('SETTINGS_CHANGED', function () { observe(); });
     util.onMessage('WATCHER_ROLE', function () {
       lastBadgeKey = null; // 담당이 되면 현재 값을 바로 보낸다
+      // 이미 안정화된 대기 탭이 담당을 이어받으면 첫 보고는 저장된 기준값과의 일반 비교다(기획서 6-1).
+      // initial 로 보내면 'away' 로 분류돼 목록 후보와 합쳐지지 않고 알림이 두 번 간다.
+      if (settle && settle.phase !== 'load') initialPending = false;
       observe();
       heartbeat();
     });
