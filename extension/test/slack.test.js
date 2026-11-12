@@ -68,10 +68,22 @@ test('customer text cannot trigger mentions or links', () => {
 
 test('dedup key: same detailed item matches, badge-only key changes per minute and value', () => {
   assert.equal(K.dedupKey(base, 0), K.dedupKey({ ...base, id: '2' }, 999999));
-  const b = { ...base, sender: null, preview: null, count: 2 };
+  const b = { ...base, sender: null, preview: null, count: 2, badgeValue: 2 };
   assert.equal(K.dedupKey(b, 60000), K.dedupKey(b, 119999));
   assert.notEqual(K.dedupKey(b, 60000), K.dedupKey(b, 120000));
-  assert.notEqual(K.dedupKey(b, 0), K.dedupKey({ ...b, count: 3 }, 0));
+  assert.notEqual(K.dedupKey(b, 0), K.dedupKey({ ...b, badgeValue: 3 }, 0));
+});
+
+test('Ruling 11: count-only key uses the absolute badge value, not the delta count', () => {
+  const b = { ...base, id: 'x1', sender: null, preview: null, count: 1, kind: 'new' };
+  // 같은 분 안의 +1 두 번(배지 3, 4)은 서로 다른 알림이다
+  assert.notEqual(K.dedupKey({ ...b, badgeValue: 3 }, 60000), K.dedupKey({ ...b, id: 'x2', badgeValue: 4 }, 60001));
+  // 같은 배지 값, 같은 분이면 중복
+  assert.equal(K.dedupKey({ ...b, badgeValue: 3 }, 60000), K.dedupKey({ ...b, id: 'x2', badgeValue: 3, count: 2 }, 60001));
+  // 배지 값이 없는 항목(이전 버전 대기열)은 서로 겹치지 않는다
+  assert.notEqual(K.dedupKey({ ...b, id: 'a' }, 0), K.dedupKey({ ...b, id: 'b' }, 0));
+  // 상세 항목 키는 배지 값과 무관하다
+  assert.equal(K.dedupKey({ ...base, badgeValue: 3 }, 0), K.dedupKey({ ...base, badgeValue: 9 }, 0));
 });
 
 test('duplicate window is 10 minutes, sent keys expire after 24h', () => {
@@ -93,4 +105,25 @@ test('sender is cut to 100 characters', () => {
   const p = K.buildSlackPayload({ ...base, sender: 'S'.repeat(300) }, settings, 0);
   assert.ok(!allText(p).includes('S'.repeat(101)));
   assert.ok(allText(p).includes('S'.repeat(100) + '...'));
+});
+
+test('Ruling 13: slackConfigState — disabled is a silent skip, only an empty webhook is not configured', () => {
+  assert.equal(K.slackConfigState({ slackEnabled: false, slackWebhookUrl: '' }), 'disabled');
+  assert.equal(K.slackConfigState({ slackEnabled: false, slackWebhookUrl: 'https://hooks.slack.com/services/x' }), 'disabled');
+  assert.equal(K.slackConfigState({ slackEnabled: true, slackWebhookUrl: '' }), 'missing');
+  assert.equal(K.slackConfigState({ slackEnabled: true, slackWebhookUrl: '  ' }), 'missing');
+  assert.equal(K.slackConfigState({ slackEnabled: true, slackWebhookUrl: 'https://hooks.slack.com/services/x' }), 'ok');
+});
+
+test('Ruling 13: notConfiguredUpdate writes lastError only when it changes', () => {
+  const nc = { source: 'slack', code: 'NOT_CONFIGURED', message: 'm', status: null, at: 1 };
+  assert.equal(K.needsNotConfiguredWrite(nc), false); // 이미 같은 상태: 다시 쓰지 않는다(at 갱신 없음)
+  assert.equal(K.needsNotConfiguredWrite(null), true);
+  assert.equal(K.needsNotConfiguredWrite({ source: 'slack', code: 'CONFIG', status: 404, at: 1 }), true);
+  // 설정 필요 상태가 더는 맞지 않으면 지운다(Slack 끔이거나 주소가 생김). 다른 오류는 그대로 둔다.
+  assert.equal(K.staleNotConfigured(nc, { slackEnabled: false, slackWebhookUrl: '' }), true);
+  assert.equal(K.staleNotConfigured(nc, { slackEnabled: true, slackWebhookUrl: 'https://hooks.slack.com/services/x' }), true);
+  assert.equal(K.staleNotConfigured(nc, { slackEnabled: true, slackWebhookUrl: '' }), false);
+  assert.equal(K.staleNotConfigured({ source: 'slack', code: 'CONFIG' }, { slackEnabled: false }), false);
+  assert.equal(K.staleNotConfigured(null, { slackEnabled: false }), false);
 });

@@ -17,6 +17,9 @@
   "background": {
     "service_worker": "background.js"
   },
+  "action": {
+    "default_title": "Meta Inbox Helper"
+  },
   "options_ui": {
     "page": "options/options.html",
     "open_in_tab": true

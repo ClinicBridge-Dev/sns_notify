@@ -6,7 +6,7 @@
   // st = { queue, recent }. 모든 함수는 입력을 바꾸지 않고 새 st 를 돌려준다.
   function makeItem(newId, now, o) {
     return Object.assign({
-      id: newId(), type: 'badge', channel: '', count: 1, kind: 'new', manualHint: false,
+      id: newId(), type: 'badge', channel: '', count: 1, badgeValue: null, kind: 'new', manualHint: false,
       sender: null, preview: null, time: null, text: null,
       createdAt: now, status: 'ready', holdUntil: null, attempts: 0, nextTryAt: 0
     }, o);
@@ -14,22 +14,25 @@
 
   function hasDetail(it) { return !!(it.sender || it.preview); }
 
+  // 이벤트의 절대 배지 값(건수 알림 중복 키용, 기획서 6-4). 없으면 null.
+  function bv(ev) { return typeof ev.badgeValue === 'number' && Number.isFinite(ev.badgeValue) ? ev.badgeValue : null; }
+
   function routeBadgeEvent(st, ev, now, newId) {
     const queue = st.queue.slice();
     const recent = st.recent.slice();
     if (ev.kind === 'away') {
       // 자리 비운 사이 알림은 보류하지 않고 건수 알림으로 바로 보낸다. 보충 기록도 남기지 않는다.
-      queue.push(makeItem(newId, now, { type: 'badge', channel: ev.channel, count: ev.count, kind: 'away', manualHint: !!ev.manualHint }));
+      queue.push(makeItem(newId, now, { type: 'badge', channel: ev.channel, count: ev.count, badgeValue: bv(ev), kind: 'away', manualHint: !!ev.manualHint }));
       return { queue: queue, recent: recent };
     }
     // 같은 채널에서 먼저 도착해 보류 중인 목록 항목(가장 오래된 것)과 합친다.
     const i = queue.findIndex(function (q) { return q.status === 'hold' && q.type === 'list' && q.channel === ev.channel; });
     if (i >= 0) {
-      queue[i] = Object.assign({}, queue[i], { count: ev.count, kind: ev.kind, manualHint: !!ev.manualHint, status: 'ready', holdUntil: null });
+      queue[i] = Object.assign({}, queue[i], { count: ev.count, badgeValue: bv(ev), kind: ev.kind, manualHint: !!ev.manualHint, status: 'ready', holdUntil: null });
       return { queue: queue, recent: recent };
     }
     queue.push(makeItem(newId, now, {
-      type: 'badge', channel: ev.channel, count: ev.count, kind: ev.kind, manualHint: !!ev.manualHint,
+      type: 'badge', channel: ev.channel, count: ev.count, badgeValue: bv(ev), kind: ev.kind, manualHint: !!ev.manualHint,
       status: 'hold', holdUntil: now + HOLD_MS
     }));
     return { queue: queue, recent: recent };

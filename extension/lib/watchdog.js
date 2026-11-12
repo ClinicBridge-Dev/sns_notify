@@ -26,6 +26,38 @@
     return { ws: next, alert: null };
   }
 
+  // 감지 실패 경고를 받을 경로(기획서 6-5, 최종 검토 8번). 관련 없는 Business 화면(비밀번호 입력란이 있는 설정 화면 등)이
+  // "로그인 화면" 경고를 내지 않게 한다.
+  // - selector, no_asset_id: 수신함 경로에서만.
+  // - login: 수신함 경로, 또는 수신함이었던 탭(wasInboxTab)이 로그인·보안 확인 경로로 바뀐 경우.
+  // BLOCKED_PATH_RE 는 content/selectors.js 의 같은 이름 값과 같다(service worker 는 selectors.js 를 읽지 않는다).
+  const INBOX_PATH_RE = /^\/latest\/inbox(?:[/?#]|$)/;
+  const BLOCKED_PATH_RE = /^\/(?:login(?:[/.?]|$)|checkpoint(?:\/|$)|two_step_verification(?:\/|$)|two_factor(?:\/|$))/;
+  const INBOX_TABS_CAP = 50;
+
+  function failureReportAllowed(reason, path, wasInboxTab) {
+    if (typeof path !== 'string') return false;
+    const inbox = INBOX_PATH_RE.test(path);
+    if (reason === 'selector' || reason === 'no_asset_id') return inbox;
+    if (reason === 'login') return inbox || (!!wasInboxTab && BLOCKED_PATH_RE.test(path));
+    return false;
+  }
+
+  // 수신함 경로에서 소식을 보낸 탭 번호 목록(최근 INBOX_TABS_CAP 개). 바뀐 것이 없으면 같은 배열을 돌려준다.
+  function rememberInboxTab(ids, tabId, path) {
+    const list = Array.isArray(ids) ? ids : [];
+    if (typeof tabId !== 'number' || typeof path !== 'string' || !INBOX_PATH_RE.test(path) || list.indexOf(tabId) >= 0) return list;
+    return list.concat([tabId]).slice(-INBOX_TABS_CAP);
+  }
+
+  function forgetInboxTab(ids, tabId) {
+    const list = Array.isArray(ids) ? ids : [];
+    return list.indexOf(tabId) < 0 ? list : list.filter(function (t) { return t !== tabId; });
+  }
+
+  root.failureReportAllowed = failureReportAllowed;
+  root.rememberInboxTab = rememberInboxTab;
+  root.forgetInboxTab = forgetInboxTab;
   root.onHeartbeat = onHeartbeat;
   root.watchdogTick = watchdogTick;
 })(typeof module !== 'undefined' && module.exports ? module.exports : (self.MBX = self.MBX || {}));

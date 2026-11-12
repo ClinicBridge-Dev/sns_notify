@@ -71,3 +71,14 @@ test('list-only item is released as a detailed notice and leaves no supplement r
   assert.equal(st.queue[0].status, 'ready');
   assert.deepEqual(st.recent, []);
 });
+
+test('Ruling 11: badge items carry badgeValue (hold, away, and joined list item)', () => {
+  let st = C.routeBadgeEvent(empty(), ev({ badgeValue: 3 }), 1000, id);
+  assert.equal(st.queue[0].badgeValue, 3);
+  st = C.routeBadgeEvent(empty(), ev({ kind: 'away', count: 2, badgeValue: 5 }), 1000, id);
+  assert.equal(st.queue[0].badgeValue, 5);
+  st = C.routeCandidate(empty(), cand(), 1000, id);
+  st = C.routeBadgeEvent(st, ev({ badgeValue: 7 }), 2000, id);
+  assert.equal(st.queue[0].badgeValue, 7);
+  assert.equal(C.routeCandidate(empty(), cand(), 1000, id).queue[0].badgeValue, null);
+});

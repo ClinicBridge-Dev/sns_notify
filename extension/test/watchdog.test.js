@@ -46,3 +46,31 @@ test('no generic stopped alert while a reason-specific failure alert is active',
   assert.equal(W.watchdogTick(ws({ lastAlarmAt: 3 * MIN, failAlerts: ['selector'] }), '42', 4 * MIN).alert, null);
   assert.equal(W.watchdogTick(ws({ lastAlarmAt: 3 * MIN, failAlerts: [] }), '42', 4 * MIN).alert, 'stopped');
 });
+
+test('item 8: failure reports are accepted only from inbox tabs (login also from a blocked path of a former inbox tab)', () => {
+  const A = W.failureReportAllowed;
+  assert.equal(A('selector', '/latest/inbox/wec', false), true);
+  assert.equal(A('no_asset_id', '/latest/inbox/all', false), true);
+  assert.equal(A('selector', '/settings', true), false);
+  assert.equal(A('login', '/latest/inbox/wec', false), true);
+  // 관련 없는 Business 화면(비밀번호 입력란 등)은 경고하지 않는다
+  assert.equal(A('login', '/settings/security', false), false);
+  assert.equal(A('login', '/settings/security', true), false);
+  // 로그인·보안 확인 경로: 수신함이었던 탭에서만
+  assert.equal(A('login', '/login/', true), true);
+  assert.equal(A('login', '/checkpoint/1501092823525282/', true), true);
+  assert.equal(A('login', '/login/', false), false);
+  assert.equal(A('bogus', '/latest/inbox/wec', true), false);
+});
+
+test('item 8: rememberInboxTab / forgetInboxTab keep a bounded list of tabs seen on an inbox path', () => {
+  let ids = W.rememberInboxTab([], 5, '/latest/inbox/wec');
+  assert.deepEqual(ids, [5]);
+  assert.equal(W.rememberInboxTab(ids, 5, '/latest/inbox/all'), ids);
+  assert.equal(W.rememberInboxTab(ids, 6, '/login/'), ids);
+  assert.deepEqual(W.forgetInboxTab(ids, 5), []);
+  let many = [];
+  for (let i = 0; i < 60; i++) many = W.rememberInboxTab(many, i, '/latest/inbox');
+  assert.equal(many.length, 50);
+  assert.equal(many[0], 10);
+});

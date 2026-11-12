@@ -20,7 +20,8 @@ function defaultState() {
         wec: { base: 0, known: false, pending: null }
       },
       ownerTabId: null, lastHeartbeat: 0, everSeen: false,
-      stoppedAlertSent: false, lastAlarmAt: 0, failAlerts: []
+      stoppedAlertSent: false, lastAlarmAt: 0, failAlerts: [],
+      inboxTabIds: [] // 수신함 경로에서 소식을 보낸 탭(로그인 경고 허용 판단). port 끊김으로는 지우지 않는다
     },
     tabsSeen: [], // [{ tabId, assetId, path, lastSeen }] 수신함 탭(HELLO·HEARTBEAT로 갱신)
     lastSend: null, // { at, outcome, status } 마지막 Slack 전송 결과(주소·본문 없음)
@@ -195,7 +196,13 @@ async function touchTab(tabId, assetId, path, now, alive) {
   const tabs = all.filter(function (t) { return t.tabId !== tabId; });
   const lastSeen = alive === false && prev ? (prev.lastSeen || 0) : now;
   tabs.push({ tabId: tabId, assetId: assetId, path: path, lastSeen: lastSeen });
-  await saveState({ tabsSeen: tabs });
+  const patch = { tabsSeen: tabs };
+  // 수신함이었던 탭을 기억한다. 로그인·보안 확인 화면으로 바뀌어 다시 로드되면 port 끊김으로 tabsSeen 에서는 지워지므로 따로 둔다.
+  const { watcherState } = await loadState(['watcherState']);
+  const ws = watcherState || defaultState().watcherState;
+  const ids = MBX.rememberInboxTab(ws.inboxTabIds, tabId, path);
+  if (ids !== ws.inboxTabIds) patch.watcherState = Object.assign({}, ws, { inboxTabIds: ids });
+  await saveState(patch);
 }
 
 async function forgetTab(tabId) {
@@ -291,6 +298,10 @@ chrome.tabs.onRemoved.addListener(function (tabId) {
   ports.forEach(function (info, p) { if (info.tabId === tabId) ports.delete(p); });
   runSerial(async function () {
     await forgetTab(tabId);
+    const { watcherState } = await loadState(['watcherState']);
+    const ws = watcherState || defaultState().watcherState;
+    const ids = MBX.forgetInboxTab(ws.inboxTabIds, tabId);
+    if (ids !== ws.inboxTabIds) await saveState({ watcherState: Object.assign({}, ws, { inboxTabIds: ids }) });
     await recomputeOwner(Date.now());
   }).catch(function () { console.debug('tab removed handling failed'); });
 });
@@ -300,7 +311,7 @@ function resetTabs() {
   runSerial(async function () {
     const { watcherState } = await loadState(['watcherState']);
     const ws = watcherState || defaultState().watcherState;
-    await saveState({ tabsSeen: [], watcherState: Object.assign({}, ws, { ownerTabId: null }) });
+    await saveState({ tabsSeen: [], watcherState: Object.assign({}, ws, { ownerTabId: null, inboxTabIds: [] }) });
   }).catch(function () { console.debug('tab reset failed'); });
 }
 chrome.runtime.onStartup.addListener(resetTabs);
@@ -312,6 +323,18 @@ chrome.storage.onChanged.addListener(function (changes, area) {
   if (area !== 'local' || (!changes.settings && !changes.quickReplies)) return;
   runSerial(async function () {
     const full = await readFullSettings();
+    if (changes.settings) {
+      const st = await loadState(['watcherState', 'lastError']);
+      const patch = {};
+      // 알림 대상 계정이 바뀌면 이전 계정의 배지 기준값을 버린다(잘못된 "자리 비운 사이" 알림 방지). compareBadges 도 같은 확인을 한다.
+      const ws = st.watcherState || defaultState().watcherState;
+      const ws2 = MBX.resetChannelsForAsset(ws, targetOf(full));
+      if (ws2 !== ws) patch.watcherState = ws2;
+      // 설정 필요 상태가 더는 맞지 않으면(Slack 끔, 주소 입력) 지운다. 다른 오류는 그대로 둔다.
+      if (MBX.staleNotConfigured(st.lastError, full)) patch.lastError = null;
+      if (Object.keys(patch).length) await saveState(patch);
+      if ('lastError' in patch) setActionBadge('');
+    }
     const msg = { type: 'SETTINGS_CHANGED', settings: MBX.publicSettings(full), quickRepliesChanged: !!changes.quickReplies };
     ports.forEach(function (info, p) {
       try { p.postMessage(msg); } catch (e) { ports.delete(p); }
@@ -323,11 +346,14 @@ chrome.storage.onChanged.addListener(function (changes, area) {
 // ---- 배지 기준값 판단(기획서 6-1 신호 1) ----
 // Task 11에서 결합 로직에 연결한다. 지금은 메시지 본문 없이 채널과 건수만 남긴다.
 // 호출자가 직렬 큐 안에 있어야 한다(핸들러 안에서 부른다). 큐를 다시 부르면 교착되므로 runSerial 을 쓰지 않는다.
-// 설정이 없으면 enqueue 와 같이 대기열에 넣지 않는다(보류 항목과 보충 기록도 만들지 않는다). 설정 필요 상태는 lastError 와 배지 '!'.
+// Slack 이 꺼져 있으면 조용히 건너뛴다(Ruling 13). 켜져 있는데 주소가 없으면 enqueue 와 같이 대기열에 넣지 않는다
+// (보류 항목과 보충 기록도 만들지 않는다). 설정 필요 상태는 lastError 와 배지 '!'.
 async function routeInQueue(routeFn) {
   const st = await loadState(['settings', 'slackQueue', 'recentCountAlerts']);
   const full = Object.assign({}, MBX.DEFAULT_SETTINGS, st.settings);
-  if (!full.slackEnabled || !full.slackWebhookUrl) { await markNotConfigured(); return false; }
+  const cfg = MBX.slackConfigState(full);
+  if (cfg === 'disabled') return false; // Ruling 13: Slack 끔은 오류가 아니다. 조용히 건너뛴다
+  if (cfg === 'missing') { await markNotConfigured(); return false; }
   const before = Array.isArray(st.slackQueue) ? st.slackQueue : [];
   const next = routeFn({ queue: before, recent: Array.isArray(st.recentCountAlerts) ? st.recentCountAlerts : [] });
   await saveState({ slackQueue: next.queue, recentCountAlerts: next.recent });
@@ -343,9 +369,11 @@ async function onBadgeEvent(ev) {
 
 // BADGE_STATE 와 HEARTBEAT 의 badges 가 함께 쓰는 비교 경로. 직렬 큐 안에서 부른다. 형식이 틀리면 false.
 async function compareBadges(report) {
-  const { watcherState } = await loadState(['watcherState']);
-  const ws = watcherState || defaultState().watcherState;
-  const r = MBX.handleBadgeState(ws, report, Date.now());
+  const st = await loadState(['watcherState', 'settings']);
+  const ws = st.watcherState || defaultState().watcherState;
+  const full = Object.assign({}, MBX.DEFAULT_SETTINGS, st.settings);
+  // 기준값이 다른 계정 것이면 먼저 버린다(설정 변경 알림보다 보고가 먼저 처리돼도 안전하다).
+  const r = MBX.handleBadgeState(ws, report, Date.now(), targetOf(full));
   if (r.state === ws) return false;
   await saveState({ watcherState: r.state });
   for (const ev of r.events) await onBadgeEvent(ev);
@@ -428,6 +456,9 @@ handlers.HEARTBEAT = async function (msg, sender) {
   if (owner !== null && tabId !== owner) return { ok: true };
   const { watcherState } = await loadState(['watcherState']);
   const ws = watcherState || defaultState().watcherState;
+  // 수신함 탭의 실패만 경고한다. 관련 없는 Business 화면(비밀번호 입력란이 있는 설정 화면 등)은 무시한다.
+  const wasInbox = Array.isArray(ws.inboxTabIds) && ws.inboxTabIds.indexOf(tabId) >= 0;
+  if (!MBX.failureReportAllowed(msg.reason, msg.path, wasInbox)) return { ok: true };
   const sent = Array.isArray(ws.failAlerts) ? ws.failAlerts : [];
   if (sent.indexOf(msg.reason) >= 0) return { ok: true };
   console.debug('watcher failure alert', msg.reason);
@@ -471,8 +502,13 @@ handlers.SET_ASSET_FROM_OPEN_TAB = async function (msg) {
   } else {
     return { ok: false, code: 'MULTIPLE', assetIds: ids };
   }
-  const { settings } = await loadState(['settings']);
-  await saveState({ settings: Object.assign({}, MBX.DEFAULT_SETTINGS, settings, { assetId: pick }) });
+  const st = await loadState(['settings', 'watcherState']);
+  const patch = { settings: Object.assign({}, MBX.DEFAULT_SETTINGS, st.settings, { assetId: pick }) };
+  // 대상 계정이 바뀌면 이전 계정의 배지 기준값을 같은 저장에서 버린다.
+  const ws = st.watcherState || defaultState().watcherState;
+  const ws2 = MBX.resetChannelsForAsset(ws, pick);
+  if (ws2 !== ws) patch.watcherState = ws2;
+  await saveState(patch);
   return { ok: true, assetId: pick };
 };
 
@@ -492,7 +528,8 @@ handlers.GET_STATUS = async function () {
 // ---- Slack 전송 대기열(기획서 6-3, 6-4) ----
 const ALARM_NAME = 'mbx-tick';
 const SLACK_TIMEOUT_MS = 10000;
-const NOT_CONFIGURED_MESSAGE = 'Slack 알림이 꺼져 있거나 Webhook 주소가 비어 있습니다. 설정에서 확인하세요';
+const NOT_CONFIGURED_MESSAGE = 'Slack Webhook 주소가 비어 있습니다. 설정에서 확인하세요';
+const DISABLED_MESSAGE = 'Slack 알림이 꺼져 있습니다. 설정에서 "Slack 알림 사용"을 켜세요';
 
 function newItemId() {
   return (self.crypto && crypto.randomUUID) ? crypto.randomUUID() : 'q-' + Date.now() + '-' + Math.random().toString(36).slice(2);
@@ -507,25 +544,30 @@ function slackError(code, message, status) {
   return { source: 'slack', code: code, message: message, status: status === undefined ? null : status, at: Date.now() };
 }
 
+// 이미 설정 필요 상태로 기록돼 있으면 다시 쓰지 않는다(이벤트마다 lastError 를 다시 쓰지 않는다).
 async function markNotConfigured() {
-  await saveState({ lastError: slackError('NOT_CONFIGURED', NOT_CONFIGURED_MESSAGE) });
+  const { lastError } = await loadState(['lastError']);
+  if (MBX.needsNotConfiguredWrite(lastError)) await saveState({ lastError: slackError('NOT_CONFIGURED', NOT_CONFIGURED_MESSAGE) });
   setActionBadge('!');
 }
 
 // 호출자가 직렬 큐 안에 있어야 한다(저장소 읽기·쓰기를 가른다). 큐 밖에서는 runSerial(() => enqueue(item))로 부른다.
-// 대기열에 넣었으면 true, 설정이 없어 넣지 않았으면 false(lastError 에 기록).
+// 대기열에 넣었으면 'queued', Slack 이 꺼져 있으면 'disabled'(조용히 건너뜀, Ruling 13),
+// 주소가 비어 있으면 'missing'(lastError 에 기록).
 async function enqueue(item) {
   const st = await loadState(['settings', 'slackQueue']);
   const full = Object.assign({}, MBX.DEFAULT_SETTINGS, st.settings);
-  if (!full.slackEnabled || !full.slackWebhookUrl) {
+  const cfg = MBX.slackConfigState(full);
+  if (cfg === 'disabled') return 'disabled';
+  if (cfg === 'missing') {
     await markNotConfigured();
-    return false;
+    return 'missing';
   }
   const entry = Object.assign({
     id: newItemId(), createdAt: Date.now(), status: 'ready', holdUntil: null, attempts: 0, nextTryAt: 0
   }, item);
   await saveState({ slackQueue: (Array.isArray(st.slackQueue) ? st.slackQueue : []).concat([entry]) });
-  return true;
+  return 'queued';
 }
 
 // 전송 결과(id -> {outcome, status}). SEND_TEST_SLACK 이 자기 항목의 결과를 읽는 용도이며 캐시일 뿐이다.
@@ -550,7 +592,7 @@ async function postSlack(url, payload) {
 // 1단계(큐 안): 만료 폐기, 중복 폐기, 보낼 항목 선택. 2단계(큐 밖): fetch. 3단계(큐 안): 결과 반영.
 async function flushPass(now) {
   const picked = await runSerial(async function () {
-    const st = await loadState(['slackQueue', 'sentKeys', 'settings']);
+    const st = await loadState(['slackQueue', 'sentKeys', 'settings', 'lastError']);
     const full = Object.assign({}, MBX.DEFAULT_SETTINGS, st.settings);
     const sentKeys = MBX.pruneSentKeys(Array.isArray(st.sentKeys) ? st.sentKeys : [], now);
     let queue = (Array.isArray(st.slackQueue) ? st.slackQueue : []).filter(function (it) { return now - it.createdAt < MBX.QUEUE_TTL_MS; });
@@ -565,14 +607,16 @@ async function flushPass(now) {
       out.push({ item: it, key: key });
       return true;
     });
-    if (out.length && (!full.slackEnabled || !full.slackWebhookUrl)) {
-      // 대기 중에 설정이 꺼졌거나 지워졌다. 보낼 곳이 없으므로 해당 항목을 버리고 설정 필요 상태를 남긴다.
+    const cfg = MBX.slackConfigState(full);
+    if (out.length && cfg !== 'ok') {
+      // 대기 중에 Slack 이 꺼졌거나 주소가 지워졌다. 보낼 곳이 없으므로 해당 항목을 버린다.
+      // 꺼짐은 조용히(Ruling 13), 주소 없음만 설정 필요 상태를 남긴다(이미 같은 상태면 다시 쓰지 않는다).
       const drop = {};
       out.forEach(function (o) { drop[o.item.id] = true; });
       patch.slackQueue = queue.filter(function (it) { return !drop[it.id]; });
-      patch.lastError = slackError('NOT_CONFIGURED', NOT_CONFIGURED_MESSAGE);
+      if (cfg === 'missing' && MBX.needsNotConfiguredWrite(st.lastError)) patch.lastError = slackError('NOT_CONFIGURED', NOT_CONFIGURED_MESSAGE);
       await saveState(patch);
-      setActionBadge('!');
+      if (cfg === 'missing') setActionBadge('!');
       return { list: [], url: '', settings: full };
     }
     patch.slackQueue = queue;
@@ -666,7 +710,8 @@ handlers.SEND_TEST_SLACK = async function () {
     createdAt: Date.now(), status: 'ready', holdUntil: null, attempts: 0, nextTryAt: 0
   };
   const queued = await runSerial(function () { return enqueue(item); });
-  if (!queued) return { ok: false, status: null, code: 'NOT_CONFIGURED', message: NOT_CONFIGURED_MESSAGE };
+  if (queued === 'disabled') return { ok: false, status: null, code: 'DISABLED', message: DISABLED_MESSAGE };
+  if (queued !== 'queued') return { ok: false, status: null, code: 'NOT_CONFIGURED', message: NOT_CONFIGURED_MESSAGE };
   await flushQueue(Date.now());
   const r = sendResults.get(item.id);
   sendResults.delete(item.id);
@@ -716,8 +761,14 @@ chrome.alarms.onAlarm.addListener(function (alarm) {
 });
 ensureAlarm();
 // 저장된 lastError 로 아이콘 배지를 맞춘다(service worker 가 다시 떠도 '!' 가 유지된다).
+// 더는 맞지 않는 설정 필요 상태(Slack 끔, 주소 입력됨)는 여기서 지운다(Ruling 13).
 runSerial(async function () {
-  const { lastError } = await loadState(['lastError']);
+  const st = await loadState(['lastError', 'settings']);
+  let lastError = st.lastError;
+  if (MBX.staleNotConfigured(lastError, Object.assign({}, MBX.DEFAULT_SETTINGS, st.settings))) {
+    lastError = null;
+    await saveState({ lastError: null });
+  }
   setActionBadge(lastError ? '!' : '');
 }).catch(function () { console.debug('badge sync failed'); });
 releaseAndFlush();

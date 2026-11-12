@@ -102,7 +102,11 @@
   function dedupKey(item, now) {
     if (item.type === 'system') return 'system:' + item.id; // 중복 검사 대상이 아니다
     if (hasDetail(item)) return 'd:' + hash([item.channel, item.sender || '', item.preview || '', item.time || ''].join('\u0001'));
-    return 'b:' + hash([item.channel, item.kind || '', Number(item.count) || 0, Math.floor(now / 60000)].join('\u0001'));
+    // 배지 전용 알림: 채널 + 배지 값 + 분 단위 시각(기획서 6-4, Ruling 11). 증가분(count)으로 키를 만들면 같은 분 안의
+    // +1 두 번(배지 3, 4)이 같은 키가 되어 두 번째 실제 알림이 버려진다. 배지 값이 없는 항목은 항목 id 로 키를 만든다
+    // (누락보다 중복이 낫다).
+    if (typeof item.badgeValue !== 'number' || !Number.isFinite(item.badgeValue)) return 'b:id:' + String(item.id);
+    return 'b:' + hash([item.channel, item.badgeValue, Math.floor(now / 60000)].join('\u0001'));
   }
 
   function isDuplicate(sentKeys, key, now) {
@@ -131,6 +135,31 @@
     return RETRY_DELAYS_MS[Math.min(i, RETRY_DELAYS_MS.length - 1)];
   }
 
+  // Slack 설정 상태(Ruling 13). 'disabled': slackEnabled 꺼짐 — 조용히 건너뛴다(오류 아님, 기획서 6-1 여러 설치 안내).
+  // 'missing': 켜져 있는데 Webhook 주소가 비어 있음 — 설정 필요 상태(기획서 6-3). 'ok': 보낼 수 있음.
+  function slackConfigState(full) {
+    if (!full || full.slackEnabled === false) return 'disabled';
+    const url = typeof full.slackWebhookUrl === 'string' ? full.slackWebhookUrl.trim() : '';
+    return url ? 'ok' : 'missing';
+  }
+
+  function isNotConfiguredError(e) {
+    return !!e && e.source === 'slack' && e.code === 'NOT_CONFIGURED';
+  }
+
+  // 설정 필요 상태를 기록해야 하는지. 이미 같은 상태면 다시 쓰지 않는다(이벤트마다 lastError 를 다시 쓰지 않게).
+  function needsNotConfiguredWrite(lastError) {
+    return !isNotConfiguredError(lastError);
+  }
+
+  // 저장된 설정 필요 상태가 지금 설정에서 더는 맞지 않는지(꺼졌거나 주소가 생김). 다른 오류는 건드리지 않는다.
+  function staleNotConfigured(lastError, full) {
+    return isNotConfiguredError(lastError) && slackConfigState(full) !== 'missing';
+  }
+
+  root.slackConfigState = slackConfigState;
+  root.needsNotConfiguredWrite = needsNotConfiguredWrite;
+  root.staleNotConfigured = staleNotConfigured;
   root.maskPhone = maskPhone;
   root.escapeSlackText = escapeSlackText;
   root.buildSlackPayload = buildSlackPayload;
