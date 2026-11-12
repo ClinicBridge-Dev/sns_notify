@@ -4,7 +4,7 @@
 프로그램. Instagram·WhatsApp 새 메시지 Slack 알림(R1), 말풍선 번역·복사(R2~R4), 한글 입력 번역 전송(R5),
 빠른 메시지(R6, R7). 서버 없이 확장 프로그램이 Slack·DeepL을 직접 호출한다.
 
-- 기획서: `docs/etc/meta-inbox-extension-implementation-spec.md` (v1.8, 현재는 `... spec copy 2.md` — 계획서 Task 1에서 이 이름으로 옮김)
+- 기획서: `docs/etc/meta-inbox-extension-implementation-spec.md` (v1.8)
 - 구현 계획: `docs/etc/2026-11-12-meta-inbox-extension-impl-plan.md`
 - 상태: **구현 완료, 자동 테스트 186개 통과, 실제 화면 수동 확인 전.** Meta 화면에서는 아직 실행해 보지 않았다. 사용 전 `docs/etc/meta-inbox-extension-manual-checks.md`의 체크리스트(U1–U12, R1–R7)를 테스트 계정으로 확인한다. 코드는 `extension/`.
 - 설치: Chrome → 확장 프로그램 → 개발자 모드 → 「압축 해제된 확장 프로그램 로드」 → `extension/` 선택
