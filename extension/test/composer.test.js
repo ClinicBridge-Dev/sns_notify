@@ -4,6 +4,7 @@ const assert = require('node:assert');
 global.self = global;
 global.MBX = {};
 require('../lib/constants.js');
+Object.assign(global.MBX, require('../lib/sendgate.js'));
 require('../content/composer.js');
 const C = global.MBX.composer;
 
@@ -23,4 +24,11 @@ test('neither reflected -> fallback runs', () => {
 
 test('insert mode: text that was already present before does not count as reflected', () => {
   assert.equal(C._isReflected(false, 'hello', 'hello', 'hello'), false);
+});
+
+test('composer compares through sendgate.normalizeForCompare (single implementation)', () => {
+  assert.equal(C._normalize, undefined); // 중복 구현을 두지 않는다
+  // 줄바꿈·연속 공백·이모지가 있는 번역문이 입력창에서 다르게 보여도 반영된 것으로 본다(Review Focus 4).
+  const want = global.MBX.normalizeForCompare('Hello,  world 😀\n\nSecond');
+  assert.equal(C._isReflected(true, '안녕', global.MBX.normalizeForCompare('Hello, world 😀\r\nSecond '), want), true);
 });

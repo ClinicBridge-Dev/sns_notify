@@ -34,6 +34,7 @@
       "js": [
         "lib/constants.js",
         "lib/listcand.js",
+        "lib/sendgate.js",
         "lib/bubblecache.js",
         "content/selectors.js",
         "content/util.js",

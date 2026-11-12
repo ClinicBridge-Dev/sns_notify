@@ -1,4 +1,4 @@
-// 입력창 주변 UI(막대, 언어 버튼, 빠른 메시지 창)와 입력창 내용 넣기. R5(전송 가로채기)는 Task 13에서 이 파일에 더한다.
+// 입력창 주변 UI(막대, 언어 버튼, 빠른 메시지 창), 입력창 내용 넣기, R5 전송 가로채기(기획서 8장).
 // fetch와 chrome.storage는 쓰지 않는다. 입력창 내용은 paste 이벤트나 execCommand로만 바꾸고 DOM을 직접 고치지 않는다.
 // 로그는 console.debug만, 본문은 넣지 않는다.
 (function (root) {
@@ -11,8 +11,9 @@
   const LANGS = root.SEND_LANGS;
 
   // ================= 입력창 접근 =================
+  // 비교 정규화는 lib/sendgate.js의 normalizeForCompare 하나만 쓴다(호출 시점에 찾는다: node 테스트에서는 나중에 붙는다).
   function normalize(s) {
-    return String(s).replace(/[​﻿]/g, '').replace(/\s+/g, ' ').trim();
+    return root.normalizeForCompare(s);
   }
 
   function text() {
@@ -177,6 +178,312 @@
     return hay.indexOf(q.toLowerCase()) >= 0;
   }
 
+  // ================= R5: 한글 입력을 번역해 전송 (기획서 8장) =================
+  // 원칙: 실패하면 전송하지 않는다. 판단은 lib/sendgate.js(decideSend 등)에 있고 여기서는 이벤트와 흐름만 다룬다.
+  // sendgate 함수는 호출 시점에 root에서 찾는다(node 테스트에서는 composer.js보다 나중에 붙는다).
+  const MSG_LOADING = '번역 설정을 불러오는 중입니다. 잠시 후 다시 시도하세요';
+  const MSG_RELOAD = '확장 프로그램이 갱신되었습니다. 페이지를 새로고침하세요';
+  const MSG_LEFTOVER = '번역 결과에 한글이 남아 있습니다. 확인 후 Enter를 한 번 더 누르면 그대로 전송됩니다';
+  const MSG_MANUAL = '번역되었습니다. Enter를 한 번 더 눌러 전송하세요';
+  const MSG_THREAD = '대화가 바뀌어 번역 전송을 중단했습니다. 전송하지 않았습니다';
+  const MSG_EDITED = '번역 중 입력 내용이 바뀌어 중단했습니다. 전송하지 않았습니다';
+  const MSG_REPLACE = '입력창 내용을 번역문으로 바꾸지 못해 전송하지 않았습니다';
+  const MSG_REPLACE_RESTORE = '입력창 내용을 번역문으로 바꾸지 못해 전송하지 않았습니다. 원문을 다시 넣지 못했으니 입력창을 확인하세요';
+  const SENT_SHOW_MS = 5000;
+
+  function C(name, dflt) { return typeof root[name] === 'number' ? root[name] : dflt; }
+
+  let busy = false;          // 번역 처리 중(8-2의 4번). 이 동안의 Enter·전송 버튼은 삼킨다
+  let flowSeq = 0;           // 흐름 번호. 대화가 바뀌면 올려서 늦게 온 응답을 버린다
+  let bypassUntil = 0;       // 확장이 이어서 실행한 전송의 통과 표시(8-5)
+  let bypassText = null;     // 통과 표시는 입력창이 이 번역문(한글 없음)일 때만 유효하다
+  let lastTranslated = null; // 직전 번역 결과(정규화). 8-2의 6번
+  let lastTranslatedThread = null;
+  let pending = null;        // 조합 중 Enter 뒤의 "전송 대기" { until, thread, el, timer }
+  let localSettings = null;  // util.settings()가 아직 없을 때 GET_PUBLIC_SETTINGS로 받은 값
+  let sentTimer = null;
+
+  function curSettings() { return (util && util.settings()) || localSettings; }
+
+  // 수신함 경로가 아니거나 번역 전송이 꺼져 있으면(설정을 받은 뒤에만 판단) 리스너는 바로 돌아간다.
+  function guardActive() {
+    if (typeof location === 'undefined' || sel.channelFromPath(location.pathname) === null) return false;
+    const s = curSettings();
+    return !(s && s.sendTranslateEnabled === false);
+  }
+
+  function inComposer(target) {
+    const c = sel.composer();
+    if (!c || !target) return false;
+    const n = target.nodeType === 3 ? target.parentElement : target;
+    return !!n && (n === c || c.contains(n));
+  }
+
+  function bypassActive() {
+    return bypassText !== null && Date.now() < bypassUntil && normalize(text()) === bypassText;
+  }
+
+  function buildCtx() {
+    const s = curSettings();
+    const l = currentLang();
+    const tid = currentThread();
+    return {
+      text: normalize(text()),
+      bypass: bypassActive(),
+      busy: busy,
+      connected: !!(util && util.connected()),
+      settingsLoaded: !!s,
+      langLoaded: l !== null,
+      enabled: !!s && s.sendTranslateEnabled !== false,
+      lang: l,
+      lastTranslated: (lastTranslated !== null && lastTranslatedThread === tid) ? lastTranslated : null
+    };
+  }
+
+  function block(e, prevent) {
+    if (prevent) e.preventDefault();
+    e.stopImmediatePropagation();
+  }
+
+  function reloadSettings() {
+    util.send('GET_PUBLIC_SETTINGS').then(function (res) {
+      if (res && typeof res === 'object' && res.ok !== false && typeof res.sendTranslateEnabled === 'boolean') {
+        localSettings = res; render();
+      }
+    });
+  }
+
+  // 막은 뒤의 처리. 흐름과 안내는 keydown·click에서만 시작한다(keypress, keyup, mousedown, pointerdown은 막기만).
+  function act(d) {
+    if (d === 'intercept') { runFlow(false); return; }
+    if (d === 'block_loading') {
+      util.toast(MSG_LOADING);
+      if (!util.settings()) reloadSettings();
+      loadLang();
+      return;
+    }
+    if (d === 'block_disconnected') util.toast(MSG_RELOAD);
+    // 'swallow': 번역 처리 중에 다시 누른 것. 아무것도 하지 않는다.
+  }
+
+  // ---- 조합 중 Enter의 "전송 대기" (8-3) ----
+  function armPending() {
+    clearPending();
+    const p = { until: Date.now() + C('SEND_PENDING_MS', 500), thread: currentThread(), el: sel.composer(), timer: null };
+    p.timer = setTimeout(function () { if (pending === p) pending = null; }, C('SEND_PENDING_MS', 500));
+    pending = p;
+  }
+  function clearPending() {
+    if (pending) clearTimeout(pending.timer);
+    pending = null;
+  }
+  function pendingActive() {
+    if (!pending) return false;
+    if (Date.now() >= pending.until || pending.thread !== currentThread() || pending.el !== sel.composer()) { clearPending(); return false; }
+    return true;
+  }
+
+  function onKeyEvent(e) {
+    try {
+      if (!guardActive()) return;
+      if (!root.isEnterKey(e) || root.hasModifier(e)) return;
+      if (!inComposer(e.target)) return;
+      const ctx = buildCtx();
+      if (e.type !== 'keydown') {
+        // keypress, keyup: 처리 중·전송 대기 중이거나 가로챌 상황이면 막기만 한다.
+        if (ctx.bypass) return;
+        if (busy || pendingActive() || root.decideSend(ctx) !== 'pass') block(e, true);
+        return;
+      }
+      if (root.isComposingEvent(e)) {
+        // 조합 중 Enter: preventDefault는 하지 않는다(입력기가 글자를 확정해야 한다).
+        if (ctx.bypass) return;
+        if (busy) { e.stopImmediatePropagation(); return; }
+        const d = root.decideSend(ctx);
+        if (d === 'pass') return; // 번역 끔 등: Meta의 원래 동작에 맡긴다
+        e.stopImmediatePropagation();
+        if (d === 'intercept') armPending();
+        else act(d);
+        return;
+      }
+      if (pendingActive()) {
+        // 조합 종료 후 뒤따르는 조합 아님 Enter가 compositionend보다 먼저 왔다. 한 프레임 뒤에 1회 시작한다.
+        clearPending();
+        const d0 = root.decideSend(ctx);
+        if (d0 === 'pass') return;
+        block(e, true);
+        if (d0 === 'intercept') runFlow(true); else act(d0);
+        return;
+      }
+      const d = root.decideSend(ctx);
+      if (d === 'pass') return;
+      block(e, true);
+      act(d);
+    } catch (err) {
+      console.debug('send gate key error');
+      failSafe(e);
+    }
+  }
+
+  function onPointerEvent(e) {
+    try {
+      if (!guardActive()) return;
+      if (!sel.isSubmitButton(e.target)) return;
+      const d = root.decideSend(buildCtx());
+      if (d === 'pass') return;
+      block(e, true);
+      if (e.type === 'click') act(d);
+    } catch (err) {
+      console.debug('send gate click error');
+      failSafe(e);
+    }
+  }
+
+  // 판단 중 예외가 나면 한글이 있는 입력은 Meta에 넘기지 않는다.
+  function failSafe(e) {
+    try {
+      const hh = typeof root.hasHangul === 'function' ? root.hasHangul(text()) : /[가-힣ㄱ-ㅎㅏ-ㅣ]/.test(text());
+      if (hh && !bypassActive()) block(e, true);
+    } catch (e2) { /* 무시 */ }
+  }
+
+  function onCompositionEnd(e) {
+    try {
+      if (!pendingActive() || !inComposer(e.target)) return;
+      clearPending();
+      runFlow(true); // compositionend 직후에는 Lexical이 아직 반영하지 않았을 수 있다: 한 프레임 기다린다
+    } catch (err) { console.debug('send gate composition error'); }
+  }
+
+  function onFocusOut(e) {
+    if (pending && inComposer(e.target)) clearPending();
+  }
+
+  function withTimeout(p, ms) {
+    return new Promise(function (resolve) {
+      const t = setTimeout(function () { resolve({ ok: false, code: 'TIMEOUT', message: '번역 시간이 초과되었습니다' }); }, ms);
+      p.then(function (r) { clearTimeout(t); resolve(r); }, function () { clearTimeout(t); resolve({ ok: false, code: 'INTERNAL' }); });
+    });
+  }
+
+  function failText(res) {
+    if (res && res.code === 'DISCONNECTED') return MSG_RELOAD;
+    const why = (res && typeof res.message === 'string' && res.message) ? res.message : '잠시 후 다시 시도하세요';
+    return '번역하지 못해 전송하지 않았습니다. ' + why;
+  }
+
+  // 번역 흐름(8-1). busy는 시작과 동시에 켠다(compositionend와 뒤따르는 Enter가 함께 와도 1회만 실행).
+  async function runFlow(waitFrame) {
+    if (busy) return;
+    busy = true;
+    const my = ++flowSeq;
+    const tid = currentThread();
+    const c = sel.composer();
+    render();
+    try {
+      if (waitFrame) await nextFrame();
+      if (my !== flowSeq || !c || currentThread() !== tid || sel.composer() !== c) return;
+      const ctx = buildCtx();
+      ctx.busy = false;
+      const d = root.decideSend(ctx);
+      if (d !== 'intercept') { if (d !== 'pass') act(d); return; } // 'pass'면 전송하지 않고 그대로 둔다
+      const original = text();
+      const originalNorm = normalize(original);
+      const res = await withTimeout(
+        util.send('TRANSLATE', { text: original, targetLang: ctx.lang, purpose: 'send' }),
+        C('DEEPL_TIMEOUT_MS', 10000) + 2000);
+      if (my !== flowSeq) return;
+      if (currentThread() !== tid) { util.toast(MSG_THREAD); return; }
+      if (sel.composer() !== c || normalize(text()) !== originalNorm) { util.toast(MSG_EDITED); return; }
+      if (!res || res.ok !== true || typeof res.text !== 'string' || normalize(res.text) === '') { util.toast(failText(res)); return; }
+      const translated = res.text;
+      const want = normalize(translated);
+      const ok = await insertText(translated, { replaceAll: true });
+      if (my !== flowSeq) return;
+      if (currentThread() !== tid) { util.toast(MSG_THREAD); return; }
+      if (!ok || sel.composer() !== c || normalize(text()) !== want) {
+        // 교체 실패: 전송하지 않는다. 가능하면 원문을 복원한다.
+        let restored = sel.composer() === c && normalize(text()) === originalNorm;
+        if (!restored && sel.composer() === c) restored = await insertText(original, { replaceAll: true });
+        util.toast(restored ? MSG_REPLACE : MSG_REPLACE_RESTORE);
+        return;
+      }
+      lastTranslated = want; lastTranslatedThread = tid;
+      if (root.hasHangul(translated)) { util.toast(MSG_LEFTOVER); return; }
+      await continueSend(my, tid, c, want, original);
+    } catch (err) {
+      console.debug('send translate flow failed');
+    } finally {
+      if (my === flowSeq) { busy = false; render(); }
+    }
+  }
+
+  // 전송 이어가기(8-5, U7 미확인). 버튼 click(), 버튼이 없을 때만 합성 Enter. 1.5초 안에 비면 성공.
+  async function continueSend(my, tid, c, want, original) {
+    if (currentThread() !== tid || sel.composer() !== c || normalize(text()) !== want || root.hasHangul(text())) {
+      util.toast(MSG_EDITED); return;
+    }
+    bypassText = want;
+    bypassUntil = Date.now() + C('BYPASS_MS', 1000);
+    try {
+      const btn = sel.submitButton();
+      if (btn) btn.click();
+      else c.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true, cancelable: true }));
+    } catch (err) { console.debug('continue send failed'); }
+    const sent = await waitEmpty(tid, C('SEND_CONFIRM_MS', 1500));
+    bypassUntil = 0; bypassText = null;
+    if (my !== flowSeq) return;
+    if (sent) {
+      lastTranslated = null; lastTranslatedThread = null;
+      showSentOriginal(original);
+    } else {
+      util.toast(MSG_MANUAL); // 번역문에는 한글이 없으므로 다음 Enter는 그대로 전송된다
+    }
+  }
+
+  function waitEmpty(tid, ms) {
+    return new Promise(function (resolve) {
+      const t0 = Date.now();
+      const check = function () {
+        if (sel.composer() && currentThread() === tid && text() === '') { resolve(true); return; }
+        if (Date.now() - t0 >= ms) { resolve(false); return; }
+        setTimeout(check, POLL_MS);
+      };
+      setTimeout(check, POLL_MS);
+    });
+  }
+
+  // 전송 직후 한글 원문을 막대 아래에 5초간 보여 준다. 저장하지 않는다.
+  function showSentOriginal(original) {
+    if (!ui) return;
+    clearTimeout(sentTimer);
+    ui.sent.textContent = '보낸 원문: ' + String(original).replace(/\s+/g, ' ').trim();
+    ui.sent.style.display = 'block';
+    sentTimer = setTimeout(hideSentOriginal, SENT_SHOW_MS);
+  }
+  function hideSentOriginal() {
+    clearTimeout(sentTimer);
+    if (!ui) return;
+    ui.sent.textContent = '';
+    ui.sent.style.display = 'none';
+  }
+
+  // 대화가 바뀌면 처리 중인 흐름을 즉시 중단하고 기록을 지운다.
+  function onThreadChanged() {
+    clearPending();
+    lastTranslated = null; lastTranslatedThread = null;
+    bypassUntil = 0; bypassText = null;
+    if (busy) { flowSeq++; busy = false; util.toast(MSG_THREAD); }
+    hideSentOriginal();
+  }
+
+  function registerSendGate() {
+    ['keydown', 'keypress', 'keyup'].forEach(function (t) { window.addEventListener(t, onKeyEvent, true); });
+    ['click', 'mousedown', 'pointerdown'].forEach(function (t) { window.addEventListener(t, onPointerEvent, true); });
+    window.addEventListener('compositionend', onCompositionEnd, true);
+    window.addEventListener('focusout', onFocusOut, true);
+  }
+
   // ================= UI =================
   const CSS =
     '.mbx-bar{position:fixed;display:none;gap:6px;align-items:center;font:12px/1.2 system-ui,sans-serif;color:#222}' +
@@ -195,7 +502,13 @@
     '.mbx-qitem.mbx-sel{background:#dde7ff}' +
     '.mbx-qtitle{font-weight:600}.mbx-qbody{color:#555;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
     '.mbx-empty{padding:8px;color:#555}.mbx-empty a{color:#06c;cursor:pointer;text-decoration:underline}' +
-    '.mbx-outline{position:fixed;display:none;box-sizing:border-box;border:2px solid #2d8cff;border-radius:10px;pointer-events:none}';
+    '.mbx-outline{position:fixed;display:none;box-sizing:border-box;border:2px solid #2d8cff;border-radius:10px;pointer-events:none}' +
+    '.mbx-busy{position:fixed;display:none;box-sizing:border-box;border:2px solid #f08c00;border-radius:10px;pointer-events:none;' +
+    'background:rgba(255,255,255,.55)}' +
+    '.mbx-busy-label{position:absolute;right:8px;top:50%;transform:translateY(-50%);padding:2px 8px;border-radius:10px;' +
+    'background:#f08c00;color:#fff;font:12px/1.4 system-ui,sans-serif}' +
+    '.mbx-sent{position:absolute;left:0;top:100%;margin-top:2px;max-width:400px;display:none;padding:2px 6px;border-radius:6px;' +
+    'background:rgba(255,255,255,.9);color:#555;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;pointer-events:none}';
 
   let ui = null;
   let observed = null;
@@ -226,10 +539,13 @@
     qsearch.type = 'text'; qsearch.placeholder = '검색 (제목, 본문, 태그)';
     const qlist = el('div', 'mbx-qlist');
     qpanel.appendChild(qsearch); qpanel.appendChild(qlist);
-    bar.appendChild(quickBtn); bar.appendChild(langBtn); bar.appendChild(langMenu); bar.appendChild(qpanel);
+    const sent = el('div', 'mbx-sent');
+    bar.appendChild(quickBtn); bar.appendChild(langBtn); bar.appendChild(langMenu); bar.appendChild(qpanel); bar.appendChild(sent);
     const outline = el('div', 'mbx-outline');
-    h.appendChild(bar); h.appendChild(outline);
-    ui = { bar, quickBtn, langBtn, langMenu, qpanel, qsearch, qlist, outline };
+    const busyEl = el('div', 'mbx-busy');
+    busyEl.appendChild(el('span', 'mbx-busy-label', '번역 중…'));
+    h.appendChild(bar); h.appendChild(outline); h.appendChild(busyEl);
+    ui = { bar, quickBtn, langBtn, langMenu, qpanel, qsearch, qlist, outline, sent, busy: busyEl };
 
     // 버튼을 눌러도 입력창의 포커스와 커서가 유지되게 한다(검색창은 제외).
     bar.addEventListener('mousedown', function (e) { if (e.target !== qsearch) e.preventDefault(); });
@@ -343,7 +659,7 @@
     const r = c ? c.getBoundingClientRect() : null;
     const s = util.settings() || {};
     const visible = !!(r && r.width > 0 && r.height > 0 && currentThread() && !sel.dialogOpen());
-    if (!visible) { ui.bar.style.display = 'none'; ui.outline.style.display = 'none'; closePops(); return; }
+    if (!visible) { ui.bar.style.display = 'none'; ui.outline.style.display = 'none'; ui.busy.style.display = 'none'; closePops(); return; }
     ui.bar.style.display = 'flex';
     ui.bar.style.left = Math.max(4, r.left) + 'px';
     ui.bar.style.bottom = Math.max(0, window.innerHeight - r.top + 6) + 'px';
@@ -358,6 +674,12 @@
       ui.outline.style.left = (r.left - 2) + 'px'; ui.outline.style.top = (r.top - 2) + 'px';
       ui.outline.style.width = (r.width + 4) + 'px'; ui.outline.style.height = (r.height + 4) + 'px';
     } else ui.outline.style.display = 'none';
+    // "번역 중" 표시: Meta 요소의 스타일은 바꾸지 않고 입력창 위에 겹쳐 그린다.
+    if (busy) {
+      ui.busy.style.display = 'block';
+      ui.busy.style.left = (r.left - 2) + 'px'; ui.busy.style.top = (r.top - 2) + 'px';
+      ui.busy.style.width = (r.width + 4) + 'px'; ui.busy.style.height = (r.height + 4) + 'px';
+    } else ui.busy.style.display = 'none';
   }
 
   function schedule() {
@@ -370,7 +692,9 @@
   function tick() {
     // 대화 전환 감지(주소 변화 콜백보다 먼저일 수 있다). 대화가 바뀌면 언어를 다시 불러온다.
     const tid = currentThread();
-    if (tid !== loadingThread) { closePops(); loadLang(); }
+    if (tid !== loadingThread) { closePops(); onThreadChanged(); loadLang(); }
+    // 직전 번역 결과 기록은 입력창이 비워지면 지운다(8-2 보충).
+    if (lastTranslated !== null && !busy && text() === '') { lastTranslated = null; lastTranslatedThread = null; }
     const c = sel.composer();
     if (c !== observed) {
       observed = c;
@@ -398,14 +722,21 @@
     insertText: insertText,
     currentLang: currentLang,
     text: text,
-    // Task 13(전송 가로채기)이 같은 규칙으로 쓰는 도구
-    _normalize: normalize,
     _decideFallback: decideFallback,
     _isReflected: isReflected,
-    _selectAll: selectAll
+    _selectAll: selectAll,
+    // 전송 가로채기 테스트용(test/composer-send.test.js)
+    _gate: {
+      onKeyEvent: onKeyEvent, onPointerEvent: onPointerEvent, onCompositionEnd: onCompositionEnd, onFocusOut: onFocusOut,
+      onThreadChanged: onThreadChanged,
+      state: function () { return { busy: busy, lastTranslated: lastTranslated, pending: pendingActive(), bypass: bypassActive() }; },
+      setLang: function (tid, l) { lang = l; langThread = tid; loadingThread = tid; }
+    }
   };
 
-  if (typeof document !== 'undefined' && root.sel && root.util) {
+  if (typeof document !== 'undefined' && typeof window !== 'undefined' && root.sel && root.util) {
+    // 전송 가로채기 리스너는 Meta보다 먼저 실행되도록 document_start(스크립트 로드 즉시)에 window capture로 건다.
+    registerSendGate();
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init, { once: true });
     else init();
   }
