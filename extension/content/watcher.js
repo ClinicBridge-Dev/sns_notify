@@ -6,9 +6,6 @@
   const util = root.util;
   const L = root; // lib/listcand.js, lib/constants.js 가 MBX에 붙인 함수와 상수
 
-  // Task 12에서 제거한다. 담당 탭 선정 전 수동 확인용으로만 true로 바꾼다.
-  const DEBUG_FORCE_OWNER = false;
-
   const POLL_MS = 60000;          // 관찰자가 끊겼을 때 대비한 보조 조회
   const FAIL_AFTER_MS = 60000;    // 로그인 화면·선택자 실패·asset_id 없음이 이만큼 이어지면 알린다
   const USER_ACTION_MS = 2000;    // userActionRecent 범위
@@ -47,7 +44,7 @@
   let mo = null;
   let notice = null;
 
-  function isOwner() { return DEBUG_FORCE_OWNER || util.role() === 'owner'; }
+  function isOwner() { return util.role() === 'owner'; }
   function inInbox() { return sel.channelFromPath(location.pathname) !== null; }
   function visible() { return document.visibilityState === 'visible'; }
 
@@ -216,10 +213,14 @@
     try { heartbeatOnce(); } catch (e) { console.debug('watcher heartbeat error'); }
   }
 
+  // 정상 신호(ok: true)는 담당 탭만 보낸다. 실패 신호(원인 있음, 60초 이상)는 담당 여부와 관계없이 보낸다:
+  // asset_id를 못 읽은 탭은 담당이 될 수 없으므로, 담당만 보내게 하면 그 원인을 알릴 길이 없다.
+  // service worker는 담당이 보냈거나 담당이 없을 때만 실패 경고를 낸다(정상인 담당이 있으면 무시).
   function heartbeatOnce() {
-    if (!started || !isOwner()) return;
+    if (!started) return;
     const now = Date.now();
     const h = updateHealth(now);
+    if (h.ok && !isOwner()) return;
     if (!h.ok && (!h.reason || !failingLongEnough(now))) return;
     const msg = { asset_id: currentAssetId() || '', ok: h.ok, reason: h.reason, path: location.pathname };
     if (h.ok && settle.phase !== 'load') {

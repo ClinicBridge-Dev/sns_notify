@@ -49,7 +49,7 @@ MBX.util = {
 };
 const created = [];
 global.document.createElement = (tag) => { const e = { tag, style: {}, textContent: '', appendChild() {}, addEventListener() {} }; created.push(e); return e; };
-// DEBUG_FORCE_OWNER는 false 이므로 role 'owner'로 흉내 낸다
+// 기본은 담당(role 'owner')으로 흉내 낸다. 대기·다른 계정은 setRole 로 바꾼다.
 delete require.cache[require.resolve(EXT + 'content/watcher.js')];
 require(EXT + 'content/watcher.js');
 const mut = () => mos[0].cb([]);
@@ -251,4 +251,34 @@ test('standby role sends LIST_CANDIDATE but never BADGE_STATE or HEARTBEAT', () 
   e.handlers.WATCHER_ROLE.forEach(f => f({ type: 'WATCHER_ROLE', role: 'standby' }));
   e.advance(70000); e.hb();
   assert.deepEqual(e.sent.map(s => s.type), ['LIST_CANDIDATE']);
+}));
+
+// Task 12: 실패 신호는 담당 여부와 관계없이 보낸다(asset_id를 못 읽은 탭은 담당이 될 수 없다). 정상 신호는 담당만.
+test('standby tab reports a failure heartbeat after 60s, without badges', () => withEnv((e) => {
+  e.setRole('standby');
+  e.ready();
+  const sel = global.MBX.sel;
+  const origList = sel.listContainer;
+  sel.listContainer = () => null; e.mut();
+  e.advance(61000);
+  sel.listContainer = origList;
+  const hbs = e.sent.filter(s => s.type === 'HEARTBEAT');
+  assert.equal(hbs.length, 1);
+  assert.deepEqual([hbs[0].ok, hbs[0].reason, 'badges' in hbs[0]], [false, 'selector', false]);
+  assert.equal(e.sent.filter(s => s.type === 'BADGE_STATE').length, 0);
+}));
+
+test('tab that cannot read asset_id (never owner) reports no_asset_id after 60s', () => withEnv((e) => {
+  e.setRole('other_account');
+  e.ready();
+  const sel = global.MBX.sel;
+  const origTabs = sel.channelTabs, origHref = global.location.href;
+  sel.channelTabs = () => [{ getAttribute: () => '/latest/inbox/wec' }];
+  global.location.href = 'https://business.facebook.com/latest/inbox/wec';
+  e.mut();
+  e.advance(61000);
+  sel.channelTabs = origTabs; global.location.href = origHref;
+  const hbs = e.sent.filter(s => s.type === 'HEARTBEAT');
+  assert.equal(hbs.length, 1);
+  assert.deepEqual([hbs[0].ok, hbs[0].reason, hbs[0].asset_id], [false, 'no_asset_id', '']);
 }));

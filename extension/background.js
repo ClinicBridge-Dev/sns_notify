@@ -1,4 +1,4 @@
-importScripts('lib/constants.js', 'lib/settings.js', 'lib/serial.js', 'lib/deepl.js', 'lib/threadlang.js', 'lib/badge.js', 'lib/listcand.js', 'lib/slack.js', 'lib/combine.js');
+importScripts('lib/constants.js', 'lib/settings.js', 'lib/serial.js', 'lib/deepl.js', 'lib/threadlang.js', 'lib/badge.js', 'lib/listcand.js', 'lib/slack.js', 'lib/combine.js', 'lib/owner.js', 'lib/watchdog.js');
 
 const MBX = self.MBX;
 const runSerial = MBX.createSerialQueue();
@@ -20,8 +20,10 @@ function defaultState() {
         wec: { base: 0, known: false, pending: null }
       },
       ownerTabId: null, lastHeartbeat: 0, everSeen: false,
-      stoppedAlertSent: false, lastAlarmAt: 0
+      stoppedAlertSent: false, lastAlarmAt: 0, failAlerts: []
     },
+    tabsSeen: [], // [{ tabId, assetId, path, lastSeen }] 수신함 탭(HELLO·HEARTBEAT로 갱신)
+    lastSend: null, // { at, outcome, status } 마지막 Slack 전송 결과(주소·본문 없음)
     threadLangs: {},
     slackQueue: [],
     sentKeys: [],
@@ -155,8 +157,8 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
   return true;
 });
 
-// ---- content script 연결(port) ----
-// port별 정보는 캐시일 뿐이다(service worker가 종료되면 사라진다). 영속 상태는 Task 12에서 저장소에 둔다.
+// ---- content script 연결(port)과 감지 담당 탭(기획서 6-1 "감지 담당 탭") ----
+// port별 정보는 캐시일 뿐이다(service worker가 종료되면 사라진다). 영속 상태는 저장소의 tabsSeen, watcherState.ownerTabId.
 const ports = new Map(); // port -> { assetId, path, tabId, role }
 
 function portIsContent(port) {
@@ -164,9 +166,15 @@ function portIsContent(port) {
   return MBX.classifySender(port.sender, chrome.runtime.id) === 'content';
 }
 
-// role 계산은 이 함수 한 곳에서만 한다. Task 12에서 감지 담당 선정으로 바뀐다.
-function computeRole(fullSettings, info) {
-  return MBX.roleFor(fullSettings, info.assetId);
+function targetOf(full) {
+  return typeof full.assetId === 'string' ? full.assetId.trim() : '';
+}
+
+// role 계산은 이 함수 한 곳에서만 한다. 대상 계정의 탭이면 담당(chooseOwner 결과)인지에 따라 owner/standby.
+function computeRole(fullSettings, info, ownerTabId) {
+  const r = MBX.roleFor(fullSettings, info.assetId);
+  if (r !== 'standby') return r;
+  return info.tabId !== null && info.tabId === ownerTabId ? 'owner' : 'standby';
 }
 
 async function readFullSettings() {
@@ -174,21 +182,91 @@ async function readFullSettings() {
   return Object.assign({}, MBX.DEFAULT_SETTINGS, settings);
 }
 
+function readTabs(v) { return Array.isArray(v) ? v.filter(function (t) { return t && typeof t.tabId === 'number'; }) : []; }
+
+// 이하 tabsSeen·담당 함수는 모두 직렬 큐 안에서 부른다.
+async function touchTab(tabId, assetId, path, now) {
+  const { tabsSeen } = await loadState(['tabsSeen']);
+  const tabs = readTabs(tabsSeen).filter(function (t) { return t.tabId !== tabId; });
+  tabs.push({ tabId: tabId, assetId: assetId, path: path, lastSeen: now });
+  await saveState({ tabsSeen: tabs });
+}
+
+async function forgetTab(tabId) {
+  const { tabsSeen } = await loadState(['tabsSeen']);
+  const before = readTabs(tabsSeen);
+  const tabs = before.filter(function (t) { return t.tabId !== tabId; });
+  if (tabs.length !== before.length) await saveState({ tabsSeen: tabs });
+}
+
+// 바뀐 role 만 알린다. HELLO 응답 전(role === null)인 port 는 HELLO 응답이 role 을 준다.
+function pushRoles(full, ownerTabId) {
+  ports.forEach(function (info, p) {
+    if (info.role === null) return;
+    const role = computeRole(full, info, ownerTabId);
+    if (role === info.role) return;
+    info.role = role;
+    try { p.postMessage({ type: 'WATCHER_ROLE', role: role }); } catch (e) { ports.delete(p); }
+  });
+}
+
+// tabsSeen 정리 → chooseOwner → 바뀌었으면 저장 → 바뀐 role 알림. 담당 탭 번호(없으면 null)를 돌려준다.
+// 정리 기준: 이 service worker 에 연결(port)이 살아 있거나 OWNER_TIMEOUT_MS 안에 소식이 있었던 탭만 남긴다.
+// (service worker 재시작 직후에는 port 가 비어 있지만 content script 가 1초 뒤 다시 연결해 HELLO 를 보낸다.)
+async function recomputeOwner(now) {
+  const st = await loadState(['settings', 'tabsSeen', 'watcherState']);
+  const full = Object.assign({}, MBX.DEFAULT_SETTINGS, st.settings);
+  const ws = st.watcherState || defaultState().watcherState;
+  const live = new Set();
+  ports.forEach(function (info) { if (info.tabId !== null) live.add(info.tabId); });
+  const before = readTabs(st.tabsSeen);
+  let tabs = before.filter(function (t) { return live.has(t.tabId) || now - (t.lastSeen || 0) <= MBX.OWNER_TIMEOUT_MS; });
+  const prev = typeof ws.ownerTabId === 'number' ? ws.ownerTabId : null;
+  const owner = MBX.chooseOwner(prev, tabs, targetOf(full), now, MBX.OWNER_TIMEOUT_MS);
+  // 새 담당은 지금부터 시간을 센다(오래전 HELLO 시각 그대로면 다음 계산에서 곧바로 시간 초과가 된다).
+  if (owner !== null && owner !== prev) {
+    tabs = tabs.map(function (t) { return t.tabId === owner ? Object.assign({}, t, { lastSeen: now }) : t; });
+  }
+  const patch = {};
+  if (JSON.stringify(tabs) !== JSON.stringify(before)) patch.tabsSeen = tabs;
+  if (owner !== prev) {
+    patch.watcherState = Object.assign({}, ws, { ownerTabId: owner });
+    console.debug('watcher owner', owner);
+  }
+  if (Object.keys(patch).length) await saveState(patch);
+  pushRoles(full, owner);
+  return owner;
+}
+
 async function handleHello(port, msg) {
   if (!msg || msg.type !== 'HELLO' || !MBX.isAllowed('HELLO', 'content') || !ports.has(port)) return;
   const info = ports.get(port);
+  const now = Date.now();
   info.assetId = typeof msg.asset_id === 'string' ? msg.asset_id : '';
   info.path = typeof msg.path === 'string' ? msg.path : '';
+  info.role = null; // 이 port 의 role 은 아래 HELLO 응답으로 준다(WATCHER_ROLE 중복 방지)
+  if (info.tabId !== null) await touchTab(info.tabId, info.assetId, info.path, now);
+  const owner = await recomputeOwner(now);
   const full = await readFullSettings();
-  info.role = computeRole(full, info);
+  info.role = computeRole(full, info, owner);
   // 비밀값은 절대 넣지 않는다.
   port.postMessage({ type: 'HELLO_REPLY', settings: MBX.publicSettings(full), role: info.role });
 }
 
 chrome.runtime.onConnect.addListener(function (port) {
   if (!portIsContent(port)) { port.disconnect(); return; }
-  ports.set(port, { assetId: '', path: '', tabId: port.sender.tab ? port.sender.tab.id : null, role: null });
-  port.onDisconnect.addListener(function () { ports.delete(port); });
+  const tabId = port.sender.tab && typeof port.sender.tab.id === 'number' ? port.sender.tab.id : null;
+  ports.set(port, { assetId: '', path: '', tabId: tabId, role: null });
+  port.onDisconnect.addListener(function () {
+    ports.delete(port);
+    runSerial(async function () {
+      // 새로고침이면 새 port 가 먼저 붙었을 수 있다. 같은 탭의 다른 port 가 살아 있으면 지우지 않는다.
+      let other = false;
+      ports.forEach(function (info) { if (info.tabId === tabId) other = true; });
+      if (tabId !== null && !other) await forgetTab(tabId);
+      await recomputeOwner(Date.now());
+    }).catch(function () { console.debug('disconnect handling failed'); });
+  });
   port.onMessage.addListener(function (msg) {
     runSerial(function () { return handleHello(port, msg); })
       .catch(function () { console.debug('hello failed'); })
@@ -196,20 +274,35 @@ chrome.runtime.onConnect.addListener(function (port) {
   });
 });
 
-// settings, quickReplies 가 바뀌면 연결된 탭에 알리고, 바뀐 role 도 다시 알린다.
+chrome.tabs.onRemoved.addListener(function (tabId) {
+  runSerial(async function () {
+    await forgetTab(tabId);
+    await recomputeOwner(Date.now());
+  }).catch(function () { console.debug('tab removed handling failed'); });
+});
+
+// 탭 번호는 브라우저 재시작·확장 다시 로드 뒤에 이어지지 않는다. 그때만 지운다(service worker 재시작에는 불리지 않으므로 담당이 유지된다).
+function resetTabs() {
+  runSerial(async function () {
+    const { watcherState } = await loadState(['watcherState']);
+    const ws = watcherState || defaultState().watcherState;
+    await saveState({ tabsSeen: [], watcherState: Object.assign({}, ws, { ownerTabId: null }) });
+  }).catch(function () { console.debug('tab reset failed'); });
+}
+chrome.runtime.onStartup.addListener(resetTabs);
+chrome.runtime.onInstalled.addListener(resetTabs);
+
+// settings, quickReplies 가 바뀌면 연결된 탭에 알리고, 담당을 다시 정해 바뀐 role 도 알린다.
+// (알림 대상 지정 직후에는 탭이 HELLO 를 다시 보내지 않으므로 여기서 tabsSeen 으로 담당을 정한다.)
 chrome.storage.onChanged.addListener(function (changes, area) {
   if (area !== 'local' || (!changes.settings && !changes.quickReplies)) return;
   runSerial(async function () {
     const full = await readFullSettings();
     const msg = { type: 'SETTINGS_CHANGED', settings: MBX.publicSettings(full), quickRepliesChanged: !!changes.quickReplies };
     ports.forEach(function (info, p) {
-      try {
-        p.postMessage(msg);
-        if (info.role === null) return; // 아직 HELLO 전이면 HELLO 응답이 role 을 준다
-        const role = computeRole(full, info);
-        if (role !== info.role) { info.role = role; p.postMessage({ type: 'WATCHER_ROLE', role: role }); }
-      } catch (e) { ports.delete(p); }
+      try { p.postMessage(msg); } catch (e) { ports.delete(p); }
     });
+    await recomputeOwner(Date.now());
   }).catch(function () { console.debug('settings push failed'); });
 });
 
@@ -234,15 +327,30 @@ async function onBadgeEvent(ev) {
   await routeInQueue(function (st) { return MBX.routeBadgeEvent(st, ev, Date.now(), newItemId); });
 }
 
-// 직렬 큐 안에서 실행된다(onMessage 라우터). 담당 탭 검사는 Task 12에서 추가한다.
-handlers.BADGE_STATE = async function (msg) {
-  const st = await loadState(['watcherState', 'settings']);
-  const full = Object.assign({}, MBX.DEFAULT_SETTINGS, st.settings);
-  if (!MBX.assetMatches(full, msg)) return { ok: false, code: 'REJECTED' };
-  const r = MBX.handleBadgeState(st.watcherState || defaultState().watcherState, msg, Date.now());
-  if (r.state === (st.watcherState)) return { ok: false, code: 'REJECTED' }; // 형식이 틀린 보고
+// BADGE_STATE 와 HEARTBEAT 의 badges 가 함께 쓰는 비교 경로. 직렬 큐 안에서 부른다. 형식이 틀리면 false.
+async function compareBadges(report) {
+  const { watcherState } = await loadState(['watcherState']);
+  const ws = watcherState || defaultState().watcherState;
+  const r = MBX.handleBadgeState(ws, report, Date.now());
+  if (r.state === ws) return false;
   await saveState({ watcherState: r.state });
   for (const ev of r.events) await onBadgeEvent(ev);
+  return true;
+}
+
+function senderTabId(sender) {
+  return sender && sender.tab && typeof sender.tab.id === 'number' ? sender.tab.id : null;
+}
+
+// 직렬 큐 안에서 실행된다(onMessage 라우터). 대상 계정이고 보낸 탭이 담당일 때만 처리한다.
+// 담당은 저장소의 ownerTabId 로 판단한다(service worker 재시작 직후에는 port 가 비어 있다).
+handlers.BADGE_STATE = async function (msg, sender) {
+  const st = await loadState(['watcherState', 'settings']);
+  const full = Object.assign({}, MBX.DEFAULT_SETTINGS, st.settings);
+  const ws = st.watcherState || defaultState().watcherState;
+  const tabId = senderTabId(sender);
+  if (!MBX.assetMatches(full, msg) || tabId === null || tabId !== ws.ownerTabId) return { ok: false, code: 'REJECTED' };
+  if (!(await compareBadges(msg))) return { ok: false, code: 'REJECTED' }; // 형식이 틀린 보고
   return { ok: true };
 };
 
@@ -262,10 +370,109 @@ handlers.LIST_CANDIDATE = async function (msg) {
   return { ok: true };
 };
 
-// 생존 신호. 감시와 담당 갱신은 Task 12에서 구현한다. 지금은 라우터가 거부하지 않도록 받기만 한다.
-handlers.HEARTBEAT = async function (msg) {
-  console.debug('heartbeat', !!msg.ok, typeof msg.reason === 'string' ? msg.reason : null);
+// ---- 생존 신호와 감지 중단 경고(기획서 6-5) ----
+const TEXT_STOPPED = '감지가 중단되었습니다. 수신함 탭을 확인하세요';
+const TEXT_RESUMED = '감지가 재개되었습니다';
+const REASON_TEXT = {
+  login: '로그인/보안 확인 화면 때문에 감지가 중단되었습니다. 수신함 탭에서 로그인 상태를 확인하세요',
+  selector: '수신함 화면 요소를 찾지 못해 감지가 중단되었습니다. 수신함 탭을 새로고침하고, 계속되면 확장 프로그램 점검이 필요합니다',
+  no_asset_id: '계정 정보(asset_id)를 읽지 못해 감지가 중단되었습니다. 수신함 탭을 새로고침하세요'
+};
+
+function systemItem(text) {
+  return { type: 'system', channel: '', count: 0, kind: 'new', manualHint: false, sender: null, preview: null, time: null, text: text };
+}
+
+// 직렬 큐 안에서 실행된다. 신호를 보낸 탭은 tabsSeen 에 반영하고 담당을 다시 정한다(계정 전환·수신함 이탈이면 넘긴다).
+// - ok: true 는 담당 탭 것만 lastHeartbeat 를 갱신한다. badges 가 있으면 BADGE_STATE 와 같은 경로로 비교한다.
+// - ok: false 는 원인(reason)별로 재개 전까지 1회 경고한다. 담당 탭이 보냈거나, 담당이 없을 때만(정상인 담당이 있으면
+//   다른 탭의 실패는 감지에 영향이 없다). asset_id 를 못 읽은 탭은 담당이 될 수 없으므로 "담당 없음"일 때 이 경로로 알린다.
+handlers.HEARTBEAT = async function (msg, sender) {
+  const tabId = senderTabId(sender);
+  if (tabId === null || typeof msg.ok !== 'boolean' || typeof msg.path !== 'string' || typeof msg.asset_id !== 'string') {
+    return { ok: false, code: 'REJECTED' };
+  }
+  const now = Date.now();
+  await touchTab(tabId, msg.asset_id, msg.path, now);
+  const owner = await recomputeOwner(now);
+  const full = await readFullSettings();
+  if (!targetOf(full)) return { ok: true };
+
+  if (msg.ok) {
+    if (tabId !== owner || !MBX.assetMatches(full, msg)) return { ok: true };
+    const { watcherState } = await loadState(['watcherState']);
+    const ws = watcherState || defaultState().watcherState;
+    const r = MBX.onHeartbeat(ws, now);
+    const hadFail = Array.isArray(ws.failAlerts) && ws.failAlerts.length > 0;
+    await saveState({ watcherState: Object.assign({}, r.ws, { failAlerts: [] }) });
+    if (r.alert === 'resumed' || hadFail) await enqueue(systemItem(TEXT_RESUMED));
+    if (msg.badges) await compareBadges({ badges: msg.badges, initial: false, userActionRecent: false, at: now });
+    return { ok: true };
+  }
+
+  if (!Object.prototype.hasOwnProperty.call(REASON_TEXT, msg.reason)) return { ok: true };
+  if (owner !== null && tabId !== owner) return { ok: true };
+  const { watcherState } = await loadState(['watcherState']);
+  const ws = watcherState || defaultState().watcherState;
+  const sent = Array.isArray(ws.failAlerts) ? ws.failAlerts : [];
+  if (sent.indexOf(msg.reason) >= 0) return { ok: true };
+  console.debug('watcher failure alert', msg.reason);
+  await saveState({ watcherState: Object.assign({}, ws, { failAlerts: sent.concat([msg.reason]) }) });
+  await enqueue(systemItem(REASON_TEXT[msg.reason]));
   return { ok: true };
+};
+
+// 1분 알람. 담당을 다시 정하고(생존 신호 90초 초과면 넘긴다) 중단 여부를 판단한다. 직렬 큐 안에서 부른다.
+async function alarmTick() {
+  const now = Date.now();
+  await recomputeOwner(now);
+  const st = await loadState(['watcherState', 'settings']);
+  const full = Object.assign({}, MBX.DEFAULT_SETTINGS, st.settings);
+  const r = MBX.watchdogTick(st.watcherState || defaultState().watcherState, targetOf(full), now);
+  await saveState({ watcherState: r.ws });
+  if (r.alert === 'stopped') {
+    console.debug('watcher stopped alert');
+    await enqueue(systemItem(TEXT_STOPPED));
+  }
+}
+
+// ---- options 페이지용 ----
+// 연결된 수신함 탭들이 HELLO·HEARTBEAT로 알려 온 asset_id 를 쓴다(chrome.tabs로 주소를 조회하지 않는다).
+// msg.assetId 가 있으면(MULTIPLE 뒤 사용자가 고른 값) 그 값이 목록에 있을 때만 저장한다.
+handlers.SET_ASSET_FROM_OPEN_TAB = async function (msg) {
+  await recomputeOwner(Date.now()); // 끊긴 탭 정리
+  const { tabsSeen } = await loadState(['tabsSeen']);
+  const ids = [];
+  readTabs(tabsSeen).forEach(function (t) {
+    if (typeof t.path === 'string' && t.path.indexOf('/latest/inbox') === 0 && typeof t.assetId === 'string' && t.assetId &&
+        ids.indexOf(t.assetId) < 0) ids.push(t.assetId);
+  });
+  if (!ids.length) return { ok: false, code: 'NO_INBOX_TAB' };
+  let pick = null;
+  if (typeof msg.assetId === 'string' && msg.assetId) {
+    if (ids.indexOf(msg.assetId) < 0) return { ok: false, code: 'REJECTED' };
+    pick = msg.assetId;
+  } else if (ids.length === 1) {
+    pick = ids[0];
+  } else {
+    return { ok: false, code: 'MULTIPLE', assetIds: ids };
+  }
+  const { settings } = await loadState(['settings']);
+  await saveState({ settings: Object.assign({}, MBX.DEFAULT_SETTINGS, settings, { assetId: pick }) });
+  return { ok: true, assetId: pick };
+};
+
+handlers.GET_STATUS = async function () {
+  const st = await loadState(['watcherState', 'lastSend', 'slackQueue', 'lastError', 'settings']);
+  const ws = st.watcherState || {};
+  return {
+    lastHeartbeat: typeof ws.lastHeartbeat === 'number' ? ws.lastHeartbeat : 0,
+    lastSend: st.lastSend || null,
+    queueLength: Array.isArray(st.slackQueue) ? st.slackQueue.length : 0,
+    lastError: st.lastError || null,
+    assetId: targetOf(Object.assign({}, MBX.DEFAULT_SETTINGS, st.settings)),
+    ownerTabId: typeof ws.ownerTabId === 'number' ? ws.ownerTabId : null
+  };
 };
 
 // ---- Slack 전송 대기열(기획서 6-3, 6-4) ----
@@ -390,6 +597,7 @@ async function flushPass(now) {
     let lastError = st.lastError;
     results.forEach(function (r) {
       sendResults.set(r.id, { outcome: r.outcome, status: r.status });
+      patch.lastSend = { at: now, outcome: r.outcome, status: r.status };
       if (r.outcome === 'ok') {
         queue = queue.filter(function (it) { return it.id !== r.id; });
         if (!r.system) sentKeys = sentKeys.concat([{ key: r.key, at: now }]);
@@ -488,7 +696,9 @@ chrome.runtime.onInstalled.addListener(ensureAlarm);
 chrome.runtime.onStartup.addListener(ensureAlarm);
 chrome.alarms.onAlarm.addListener(function (alarm) {
   if (alarm.name !== ALARM_NAME) return;
-  releaseAndFlush();
+  runSerial(alarmTick)
+    .catch(function () { console.debug('alarm tick failed'); })
+    .then(releaseAndFlush);
 });
 ensureAlarm();
 // 저장된 lastError 로 아이콘 배지를 맞춘다(service worker 가 다시 떠도 '!' 가 유지된다).

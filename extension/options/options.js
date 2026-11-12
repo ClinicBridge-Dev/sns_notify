@@ -361,19 +361,83 @@
     });
   }
 
-  // 상태 영역의 최근 오류. 저장소가 바뀌면 다시 그린다.
-  async function renderLastError() {
-    const { lastError } = await chrome.storage.local.get(['lastError']);
-    const el = $('status-error');
-    if (!lastError) { setMsg(el, '-'); return; }
-    const when = lastError.at ? new Date(lastError.at).toLocaleString() + ' ' : '';
-    setMsg(el, when + (lastError.message || lastError.code || '오류'), true);
+  // ---- 알림 대상 지정(기획서 10-4) ----
+  // service worker 가 연결된 수신함 탭들이 알려 온 asset_id 를 쓴다. 값이 여러 개면 고르게 한다.
+  function renderAssetChoices(ids) {
+    const box = $('asset-choices');
+    box.textContent = '';
+    box.hidden = !ids || !ids.length;
+    (ids || []).forEach(function (id) {
+      box.appendChild(button(id, function () { requestSetAsset(id); }));
+    });
   }
 
-  function initLastError() {
-    renderLastError().catch(function () { console.debug('status render failed'); });
+  async function requestSetAsset(choice) {
+    const out = $('asset-result');
+    const btn = $('btn-set-asset');
+    btn.disabled = true;
+    setMsg(out, '확인 중...');
+    try {
+      const r = await chrome.runtime.sendMessage(choice ? { type: 'SET_ASSET_FROM_OPEN_TAB', assetId: choice } : { type: 'SET_ASSET_FROM_OPEN_TAB' });
+      if (r && r.ok) {
+        renderAssetChoices(null);
+        $('asset-current').textContent = r.assetId;
+        setMsg(out, '알림 대상으로 지정했습니다');
+      } else if (r && r.code === 'NO_INBOX_TAB') {
+        renderAssetChoices(null);
+        setMsg(out, '수신함을 먼저 여세요', true);
+      } else if (r && r.code === 'MULTIPLE') {
+        renderAssetChoices(r.assetIds);
+        setMsg(out, '열려 있는 수신함의 계정이 여러 개입니다. 알림 대상을 고르세요');
+      } else {
+        setMsg(out, '지정하지 못했습니다. 수신함 탭을 새로고침한 뒤 다시 시도하세요', true);
+      }
+    } catch (e) {
+      setMsg(out, '지정하지 못했습니다', true);
+    } finally {
+      btn.disabled = false;
+      renderStatus().catch(function () { console.debug('status render failed'); });
+    }
+  }
+
+  function initSetAsset() {
+    const btn = $('btn-set-asset');
+    btn.disabled = false;
+    btn.removeAttribute('title');
+    btn.addEventListener('click', function () { requestSetAsset(null); });
+  }
+
+  // ---- 상태 영역 ----
+  // GET_STATUS 결과를 그리고 5초마다 갱신한다. 최근 오류는 저장소가 바뀔 때도 다시 그린다.
+  const STATUS_REFRESH_MS = 5000;
+
+  function fmtTime(at) { return at ? new Date(at).toLocaleString() : ''; }
+
+  function sendText(s) {
+    if (!s) return '-';
+    const what = s.outcome === 'ok' ? '성공' : s.outcome === 'retry' ? '실패, 재시도 예정' : '설정 오류';
+    return fmtTime(s.at) + ' ' + what + (s.status ? ' (HTTP ' + s.status + ')' : s.outcome === 'ok' ? '' : ' (네트워크 오류)');
+  }
+
+  async function renderStatus() {
+    const r = await chrome.runtime.sendMessage({ type: 'GET_STATUS' });
+    if (!r || r.ok === false) return;
+    setMsg($('status-heartbeat'), r.lastHeartbeat ? fmtTime(r.lastHeartbeat) : '아직 받지 않음');
+    setMsg($('status-owner'), !r.assetId ? '알림 대상 계정이 지정되지 않았습니다'
+      : r.ownerTabId !== null ? '있음 (탭 ' + r.ownerTabId + ')' : '없음: 대상 계정의 수신함 탭을 여세요', !r.assetId || r.ownerTabId === null);
+    setMsg($('status-slack'), sendText(r.lastSend), !!r.lastSend && r.lastSend.outcome !== 'ok');
+    setMsg($('status-queue'), String(r.queueLength));
+    const e = r.lastError;
+    setMsg($('status-error'), e ? (e.at ? fmtTime(e.at) + ' ' : '') + (e.message || e.code || '오류') : '-', !!e);
+    $('asset-current').textContent = r.assetId || '(없음)';
+  }
+
+  function initStatus() {
+    const tick = function () { renderStatus().catch(function () { console.debug('status render failed'); }); };
+    tick();
+    setInterval(tick, STATUS_REFRESH_MS);
     chrome.storage.onChanged.addListener(function (changes, area) {
-      if (area === 'local' && changes.lastError) renderLastError().catch(function () { console.debug('status render failed'); });
+      if (area === 'local' && (changes.lastError || changes.settings)) tick();
     });
   }
 
@@ -383,7 +447,8 @@
     initQuickReplies().catch(function () { console.debug('quick replies init failed'); });
     initDeeplCheck();
     initSlackTest();
-    initLastError();
+    initSetAsset();
+    initStatus();
     initSettings().catch(function () { console.debug('settings init failed'); });
   }
 })();

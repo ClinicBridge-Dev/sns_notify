@@ -76,6 +76,7 @@
       <button type="button" id="btn-set-asset" disabled title="추후 연결됩니다">현재 수신함을 알림 대상으로 지정</button>
       <span id="asset-result" class="msg"></span>
     </div>
+    <div id="asset-choices" class="row" hidden></div>
     <p>지정된 값: <code id="asset-current">(없음)</code></p>
   </section>
 
@@ -110,6 +111,7 @@
     <h2>상태</h2>
     <dl id="status-list" class="status">
       <dt>마지막 감지 신호</dt><dd id="status-heartbeat">-</dd>
+      <dt>감지 담당 탭</dt><dd id="status-owner">-</dd>
       <dt>마지막 Slack 전송 결과</dt><dd id="status-slack">-</dd>
       <dt>대기열 건수</dt><dd id="status-queue">-</dd>
       <dt>최근 오류</dt><dd id="status-error">-</dd>
