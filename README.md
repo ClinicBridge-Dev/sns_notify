@@ -1,4 +1,25 @@
-# local-whatsapp
+# sns_notify — Meta 수신함 보조 확장 프로그램
+
+**현재 메인 제품.** Meta Business Suite 수신함(business.facebook.com/latest/inbox)에서 동작하는 Chrome MV3 확장
+프로그램. Instagram·WhatsApp 새 메시지 Slack 알림(R1), 말풍선 번역·복사(R2~R4), 한글 입력 번역 전송(R5),
+빠른 메시지(R6, R7). 서버 없이 확장 프로그램이 Slack·DeepL을 직접 호출한다.
+
+- 기획서: `docs/etc/meta-inbox-extension-implementation-spec.md` (v1.8, 현재는 `... spec copy 2.md` — 계획서 Task 1에서 이 이름으로 옮김)
+- 구현 계획: `docs/etc/2026-11-12-meta-inbox-extension-impl-plan.md`
+- 상태: **구현 완료, 자동 테스트 186개 통과, 실제 화면 수동 확인 전.** Meta 화면에서는 아직 실행해 보지 않았다. 사용 전 `docs/etc/meta-inbox-extension-manual-checks.md`의 체크리스트(U1–U12, R1–R7)를 테스트 계정으로 확인한다. 코드는 `extension/`.
+- 설치: Chrome → 확장 프로그램 → 개발자 모드 → 「압축 해제된 확장 프로그램 로드」 → `extension/` 선택
+- 테스트: `node --test extension/test/*.test.js`
+
+> `extension/`(메인)과 `chrome-extension/`(레거시)은 다른 프로그램이다. 이름이 비슷하니 혼동하지 않는다.
+
+---
+
+# 레거시: local-whatsapp (Mac mini 수집기 + 서버 경유 알림)
+
+> **레거시.** 새 기능은 넣지 않고, 이미 설치된 곳의 운영·버그 수정만 한다. 사무실 Mac에서 아직 이 경로로
+> 실행 중일 수 있으므로 파일을 옮기거나 지우지 않는다. 해당 코드: `app/`, `web/`, `mac/`, `scripts/`, `launchd/`,
+> `tests/`, `chrome-extension/`, `pyproject.toml`, `config.example.yaml`. 문서: `docs/PRODUCT_SPEC.md`,
+> `docs/OPERATIONS.md`, `docs/etc/2026-11-09-impl-plan.md` 등.
 
 Mac mini 한 대에서 상담용 WhatsApp 화면을 읽어 로컬 SQLite에 저장하고, 외국어는 한국어 번역을 붙이고,
 고객의 새 메시지만 고객사 Slack 채널로 알리고, 직원이 읽기 전용 화면에서 대화를 보는 서비스.
