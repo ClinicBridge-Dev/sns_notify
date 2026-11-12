@@ -287,6 +287,8 @@ chrome.runtime.onConnect.addListener(function (port) {
 });
 
 chrome.tabs.onRemoved.addListener(function (tabId) {
+  // 닫힌 탭의 port 가 아직 Map 에 남아 있으면 recomputeOwner 가 port 정보로 tabsSeen 을 되살리므로 먼저 지운다.
+  ports.forEach(function (info, p) { if (info.tabId === tabId) ports.delete(p); });
   runSerial(async function () {
     await forgetTab(tabId);
     await recomputeOwner(Date.now());
