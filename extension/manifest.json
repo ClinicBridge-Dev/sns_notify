@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "Meta Inbox Helper",
+  "version": "0.1.0",
+  "description": "Meta Business Suite 수신함 보조: Slack 알림, 번역, 빠른 메시지",
+  "permissions": ["storage", "alarms", "clipboardWrite"],
+  "host_permissions": [
+    "https://business.facebook.com/*",
+    "https://hooks.slack.com/*",
+    "https://api.deepl.com/*",
+    "https://api-free.deepl.com/*"
+  ],
+  "background": { "service_worker": "background.js" },
+  "options_ui": { "page": "options/options.html", "open_in_tab": true },
+  "icons": { "16": "icons/icon16.png", "48": "icons/icon48.png", "128": "icons/icon128.png" }
+}
