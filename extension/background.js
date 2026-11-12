@@ -1,4 +1,4 @@
-importScripts('lib/constants.js', 'lib/settings.js', 'lib/serial.js', 'lib/deepl.js', 'lib/threadlang.js');
+importScripts('lib/constants.js', 'lib/settings.js', 'lib/serial.js', 'lib/deepl.js', 'lib/threadlang.js', 'lib/badge.js');
 
 const MBX = self.MBX;
 const runSerial = MBX.createSerialQueue();
@@ -209,3 +209,21 @@ chrome.storage.onChanged.addListener(function (changes, area) {
     });
   }).catch(function () { console.debug('settings push failed'); });
 });
+
+// ---- 배지 기준값 판단(기획서 6-1 신호 1) ----
+// Task 11에서 결합 로직에 연결한다. 지금은 메시지 본문 없이 채널과 건수만 남긴다.
+function onBadgeEvent(ev) {
+  console.debug('badge event', ev.channel, ev.count, ev.kind);
+}
+
+// 직렬 큐 안에서 실행된다(onMessage 라우터). 담당 탭 검사는 Task 12에서 추가한다.
+handlers.BADGE_STATE = async function (msg) {
+  const st = await loadState(['watcherState', 'settings']);
+  const full = Object.assign({}, MBX.DEFAULT_SETTINGS, st.settings);
+  if (typeof msg.asset_id !== 'string' || msg.asset_id !== full.assetId) return { ok: false, code: 'REJECTED' };
+  const r = MBX.handleBadgeState(st.watcherState || defaultState().watcherState, msg, Date.now());
+  if (r.state === (st.watcherState)) return { ok: false, code: 'REJECTED' }; // 형식이 틀린 보고
+  await saveState({ watcherState: r.state });
+  r.events.forEach(onBadgeEvent);
+  return { ok: true };
+};
