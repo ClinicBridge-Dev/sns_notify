@@ -128,7 +128,7 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
   }
   const run = UNQUEUED_TYPES.indexOf(type) >= 0 ? function (f) { return Promise.resolve().then(f); } : runSerial;
   run(function () { return handlers[type](msg, sender); })
-    .then(function (res) { sendResponse(res); })
+    .then(function (res) { sendResponse(res === undefined ? { ok: true } : res); })
     .catch(function () {
       console.debug('handler failed', type);
       sendResponse({ ok: false, code: 'INTERNAL' });
@@ -137,26 +137,38 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
 });
 
 // ---- content script 연결(port) ----
-// 연결된 port 목록은 캐시일 뿐이다(service worker가 종료되면 사라진다). 영속 상태는 Task 12에서 저장소에 둔다.
-const ports = new Set();
+// port별 정보는 캐시일 뿐이다(service worker가 종료되면 사라진다). 영속 상태는 Task 12에서 저장소에 둔다.
+const ports = new Map(); // port -> { assetId, path, tabId, role }
 
 function portIsContent(port) {
   // classifySender 와 같은 기준: sender.id, sender.tab.url 이 business.facebook.com 인 content 만 받는다.
   return MBX.classifySender(port.sender, chrome.runtime.id) === 'content';
 }
 
-async function handleHello(port, msg) {
-  if (!msg || msg.type !== 'HELLO' || !MBX.isAllowed('HELLO', 'content')) return;
-  const assetId = typeof msg.asset_id === 'string' ? msg.asset_id : '';
+// role 계산은 이 함수 한 곳에서만 한다. Task 12에서 감지 담당 선정으로 바뀐다.
+function computeRole(fullSettings, info) {
+  return MBX.roleFor(fullSettings, info.assetId);
+}
+
+async function readFullSettings() {
   const { settings } = await loadState(['settings']);
-  const full = Object.assign({}, MBX.DEFAULT_SETTINGS, settings);
+  return Object.assign({}, MBX.DEFAULT_SETTINGS, settings);
+}
+
+async function handleHello(port, msg) {
+  if (!msg || msg.type !== 'HELLO' || !MBX.isAllowed('HELLO', 'content') || !ports.has(port)) return;
+  const info = ports.get(port);
+  info.assetId = typeof msg.asset_id === 'string' ? msg.asset_id : '';
+  info.path = typeof msg.path === 'string' ? msg.path : '';
+  const full = await readFullSettings();
+  info.role = computeRole(full, info);
   // 비밀값은 절대 넣지 않는다.
-  port.postMessage({ type: 'HELLO_REPLY', settings: MBX.publicSettings(full), role: MBX.roleFor(full, assetId) });
+  port.postMessage({ type: 'HELLO_REPLY', settings: MBX.publicSettings(full), role: info.role });
 }
 
 chrome.runtime.onConnect.addListener(function (port) {
   if (!portIsContent(port)) { port.disconnect(); return; }
-  ports.add(port);
+  ports.set(port, { assetId: '', path: '', tabId: port.sender.tab ? port.sender.tab.id : null, role: null });
   port.onDisconnect.addListener(function () { ports.delete(port); });
   port.onMessage.addListener(function (msg) {
     runSerial(function () { return handleHello(port, msg); })
@@ -164,15 +176,19 @@ chrome.runtime.onConnect.addListener(function (port) {
   });
 });
 
-// settings, quickReplies 가 바뀌면 연결된 탭에 알린다.
+// settings, quickReplies 가 바뀌면 연결된 탭에 알리고, 바뀐 role 도 다시 알린다.
 chrome.storage.onChanged.addListener(function (changes, area) {
   if (area !== 'local' || (!changes.settings && !changes.quickReplies)) return;
   runSerial(async function () {
-    const { settings } = await loadState(['settings']);
-    const pub = MBX.publicSettings(Object.assign({}, MBX.DEFAULT_SETTINGS, settings));
-    const msg = { type: 'SETTINGS_CHANGED', settings: pub, quickRepliesChanged: !!changes.quickReplies };
-    ports.forEach(function (p) {
-      try { p.postMessage(msg); } catch (e) { ports.delete(p); }
+    const full = await readFullSettings();
+    const msg = { type: 'SETTINGS_CHANGED', settings: MBX.publicSettings(full), quickRepliesChanged: !!changes.quickReplies };
+    ports.forEach(function (info, p) {
+      try {
+        p.postMessage(msg);
+        if (info.role === null) return; // 아직 HELLO 전이면 HELLO 응답이 role 을 준다
+        const role = computeRole(full, info);
+        if (role !== info.role) { info.role = role; p.postMessage({ type: 'WATCHER_ROLE', role: role }); }
+      } catch (e) { ports.delete(p); }
     });
   }).catch(function () { console.debug('settings push failed'); });
 });

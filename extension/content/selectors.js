@@ -33,7 +33,7 @@
 
   function channelFromPath(pathname) {
     if (typeof pathname !== 'string') return null;
-    const m = /^\/latest\/inbox(?:\/([^/?#]*))?/.exec(pathname);
+    const m = /^\/latest\/inbox(?:\/([^/?#]*))?(?:\/|$)/.exec(pathname);
     if (!m) return null;
     const seg = m[1] || '';
     if (seg === 'instagram_direct' || seg === 'wec' || seg === 'all') return seg;

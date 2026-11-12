@@ -42,3 +42,9 @@ test('DOM lookups return null/empty without a document', () => {
   assert.equal(sel.submitButton(), null);
   assert.equal(sel.searchValue(), null);
 });
+
+test('channelFromPath requires a path boundary', () => {
+  assert.equal(sel.channelFromPath('/latest/inboxfoo'), null);
+  assert.equal(sel.channelFromPath('/latest/inbox'), 'other');
+  assert.equal(sel.channelFromPath('/latest/inbox/wec/x'), 'wec');
+});

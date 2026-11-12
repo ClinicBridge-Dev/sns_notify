@@ -117,7 +117,10 @@
     try {
       port.postMessage({ type: 'HELLO', asset_id: info.asset_id, path: info.path });
       helloKey = key;
-    } catch (e) { port = null; helloKey = null; console.debug('hello failed'); }
+    } catch (e) {
+      try { port.disconnect(); } catch (e2) { /* 이미 끊김 */ }
+      port = null; helloKey = null; console.debug('hello failed');
+    }
   }
 
   function send(type, payload) {
@@ -127,8 +130,9 @@
       try {
         const msg = Object.assign({}, payload || {}, { type: type });
         chrome.runtime.sendMessage(msg, function (res) {
-          if (chrome.runtime.lastError || res === undefined) { disconnected(); return; }
-          resolve(res);
+          if (chrome.runtime.lastError) { disconnected(); return; }
+          // 응답이 없는 메시지(BADGE_STATE, HEARTBEAT, OPEN_OPTIONS)는 정상이다.
+          resolve(res === undefined ? { ok: true } : res);
         });
       } catch (e) { disconnected(); }
     });
@@ -140,15 +144,18 @@
 
   // ---- 주소 변화 ----
   function onInboxChange(fn) {
+    const tabHrefs = function () {
+      return sel.channelTabs().map(function (a) { return a.getAttribute('href') || ''; });
+    };
     const keyOf = function () {
-      return location.pathname + '|' + sel.assetIdFrom(location.href, []) + '|' + sel.threadIdFrom(location.href);
+      return location.pathname + '|' + sel.assetIdFrom(location.href, tabHrefs()) + '|' + sel.threadIdFrom(location.href);
     };
     let last = keyOf();
     const check = function () {
       const k = keyOf();
       if (k === last) return;
       last = k;
-      try { fn({ path: location.pathname, assetId: sel.assetIdFrom(location.href, []), threadId: sel.threadIdFrom(location.href) }); }
+      try { fn({ path: location.pathname, assetId: sel.assetIdFrom(location.href, tabHrefs()), threadId: sel.threadIdFrom(location.href) }); }
       catch (e) { console.debug('onInboxChange handler error'); }
     };
     // 경로나 쿼리를 건드리지 않고 관찰만 한다(history API를 감싸지 않는다).
@@ -168,7 +175,8 @@
     send, connected: function () { return !!port; }, onMessage,
     settings: function () { return settings; },
     role: function () { return role; },
-    host, toast, onInboxChange
+    host, toast, onInboxChange,
+    _test: { noticeShown: function () { return noticeShown; } }
   };
 
   if (typeof document !== 'undefined' && root.sel) {
