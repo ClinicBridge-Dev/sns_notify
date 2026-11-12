@@ -88,3 +88,9 @@ test('status classes and retry schedule', () => {
   assert.deepEqual([0, 1, 2, 3, 9].map(a => K.nextRetryDelayMs(a, null)), [30000, 120000, 600000, 600000, 600000]);
   assert.equal(K.nextRetryDelayMs(0, 45), 45000);
 });
+
+test('sender is cut to 100 characters', () => {
+  const p = K.buildSlackPayload({ ...base, sender: 'S'.repeat(300) }, settings, 0);
+  assert.ok(!allText(p).includes('S'.repeat(101)));
+  assert.ok(allText(p).includes('S'.repeat(100) + '...'));
+});

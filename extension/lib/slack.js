@@ -67,7 +67,7 @@
     if (detailed) {
       if (item.sender) {
         const name = settings.slackMaskPhone ? maskPhone(item.sender) : item.sender;
-        lines.push({ k: '보낸 사람: ', v: name });
+        lines.push({ k: '보낸 사람: ', v: cut(name, 100) });
       }
       if (item.preview) {
         const unsupported = String(item.preview).indexOf(UNSUPPORTED_PREFIX) === 0;

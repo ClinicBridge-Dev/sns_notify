@@ -1,4 +1,4 @@
-importScripts('lib/constants.js', 'lib/settings.js', 'lib/serial.js', 'lib/deepl.js', 'lib/threadlang.js', 'lib/badge.js', 'lib/listcand.js', 'lib/slack.js');
+importScripts('lib/constants.js', 'lib/settings.js', 'lib/serial.js', 'lib/deepl.js', 'lib/threadlang.js', 'lib/badge.js', 'lib/listcand.js', 'lib/slack.js', 'lib/combine.js');
 
 const MBX = self.MBX;
 const runSerial = MBX.createSerialQueue();
@@ -150,7 +150,7 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
       console.debug('handler failed', type);
       sendResponse({ ok: false, code: 'INTERNAL' });
     })
-    .then(function () { return flushQueue(Date.now()); }) // 처리한 메시지마다 전송 대기 항목을 확인한다(응답은 이미 보냈다)
+    .then(releaseAndFlush) // 처리한 메시지마다 보류 해제와 전송 대기 항목을 확인한다(응답은 이미 보냈다)
     .catch(function () { console.debug('flush after message failed'); });
   return true;
 });
@@ -191,7 +191,8 @@ chrome.runtime.onConnect.addListener(function (port) {
   port.onDisconnect.addListener(function () { ports.delete(port); });
   port.onMessage.addListener(function (msg) {
     runSerial(function () { return handleHello(port, msg); })
-      .catch(function () { console.debug('hello failed'); });
+      .catch(function () { console.debug('hello failed'); })
+      .then(releaseAndFlush);
   });
 });
 
@@ -214,8 +215,23 @@ chrome.storage.onChanged.addListener(function (changes, area) {
 
 // ---- 배지 기준값 판단(기획서 6-1 신호 1) ----
 // Task 11에서 결합 로직에 연결한다. 지금은 메시지 본문 없이 채널과 건수만 남긴다.
-function onBadgeEvent(ev) {
+// 호출자가 직렬 큐 안에 있어야 한다(핸들러 안에서 부른다). 큐를 다시 부르면 교착되므로 runSerial 을 쓰지 않는다.
+// 설정이 없으면 enqueue 와 같이 대기열에 넣지 않는다(보류 항목과 보충 기록도 만들지 않는다). 설정 필요 상태는 lastError 와 배지 '!'.
+async function routeInQueue(routeFn) {
+  const st = await loadState(['settings', 'slackQueue', 'recentCountAlerts']);
+  const full = Object.assign({}, MBX.DEFAULT_SETTINGS, st.settings);
+  if (!full.slackEnabled || !full.slackWebhookUrl) { await markNotConfigured(); return false; }
+  const before = Array.isArray(st.slackQueue) ? st.slackQueue : [];
+  const next = routeFn({ queue: before, recent: Array.isArray(st.recentCountAlerts) ? st.recentCountAlerts : [] });
+  await saveState({ slackQueue: next.queue, recentCountAlerts: next.recent });
+  const held = function (q) { return q.status === 'hold'; };
+  if (next.queue.filter(held).length > before.filter(held).length) scheduleHoldRelease();
+  return true;
+}
+
+async function onBadgeEvent(ev) {
   console.debug('badge event', ev.channel, ev.count, ev.kind);
+  await routeInQueue(function (st) { return MBX.routeBadgeEvent(st, ev, Date.now(), newItemId); });
 }
 
 // 직렬 큐 안에서 실행된다(onMessage 라우터). 담당 탭 검사는 Task 12에서 추가한다.
@@ -226,14 +242,15 @@ handlers.BADGE_STATE = async function (msg) {
   const r = MBX.handleBadgeState(st.watcherState || defaultState().watcherState, msg, Date.now());
   if (r.state === (st.watcherState)) return { ok: false, code: 'REJECTED' }; // 형식이 틀린 보고
   await saveState({ watcherState: r.state });
-  r.events.forEach(onBadgeEvent);
+  for (const ev of r.events) await onBadgeEvent(ev);
   return { ok: true };
 };
 
 // ---- 목록 후보(기획서 6-1 신호 2) ----
 // Task 11에서 결합 로직에 연결한다. 지금은 본문 없이 채널만 남긴다.
-function onListCandidate(cand) {
+async function onListCandidate(cand) {
   console.debug('list candidate', cand.channel);
+  await routeInQueue(function (st) { return MBX.routeCandidate(st, cand, Date.now(), newItemId); });
 }
 
 // 직렬 큐 안에서 실행된다. 담당 여부와 관계없이 대상 계정의 탭이면 받는다.
@@ -241,7 +258,7 @@ handlers.LIST_CANDIDATE = async function (msg) {
   const full = await readFullSettings();
   if (!MBX.assetMatches(full, msg) || !MBX.validCandidateMsg(msg)) return { ok: false, code: 'REJECTED' };
   const at = (typeof msg.at === 'number' && Number.isFinite(msg.at)) ? msg.at : Date.now();
-  onListCandidate({ channel: msg.channel, sender: msg.sender, preview: msg.preview, time: msg.time, at: at });
+  await onListCandidate({ channel: msg.channel, sender: msg.sender, preview: msg.preview, time: msg.time, at: at });
   return { ok: true };
 };
 
@@ -269,13 +286,18 @@ function slackError(code, message, status) {
   return { source: 'slack', code: code, message: message, status: status === undefined ? null : status, at: Date.now() };
 }
 
+async function markNotConfigured() {
+  await saveState({ lastError: slackError('NOT_CONFIGURED', NOT_CONFIGURED_MESSAGE) });
+  setActionBadge('!');
+}
+
 // 호출자가 직렬 큐 안에 있어야 한다(저장소 읽기·쓰기를 가른다). 큐 밖에서는 runSerial(() => enqueue(item))로 부른다.
 // 대기열에 넣었으면 true, 설정이 없어 넣지 않았으면 false(lastError 에 기록).
 async function enqueue(item) {
   const st = await loadState(['settings', 'slackQueue']);
   const full = Object.assign({}, MBX.DEFAULT_SETTINGS, st.settings);
   if (!full.slackEnabled || !full.slackWebhookUrl) {
-    await saveState({ lastError: slackError('NOT_CONFIGURED', NOT_CONFIGURED_MESSAGE) });
+    await markNotConfigured();
     return false;
   }
   const entry = Object.assign({
@@ -339,11 +361,24 @@ async function flushPass(now) {
   if (!picked.list.length) return;
 
   // 큐 밖: 직렬로 하나씩 보낸다(Slack Webhook 은 초당 1건 안팎이 기준이다).
+  // 429 나 네트워크 오류가 나면 나머지는 보내지 않고 같은 nextTryAt 으로 재시도에 맡긴다(시도하지 않았으므로 attempts 는 그대로).
   const results = [];
+  let stop = null;
   for (const o of picked.list) {
+    if (stop) {
+      results.push({ id: o.item.id, key: o.key, system: o.item.type === 'system', attempts: o.item.attempts || 0, status: stop.status, outcome: 'retry', nextTryAt: stop.nextTryAt });
+      continue;
+    }
     const r = await postSlack(picked.url, MBX.buildSlackPayload(o.item, picked.settings, now));
     console.debug('slack send', r.status);
-    results.push({ id: o.item.id, key: o.key, system: o.item.type === 'system', attempts: o.item.attempts || 0, status: r.status, retryAfterSec: r.retryAfterSec, outcome: MBX.classifyStatus(r.status) });
+    const attempts = o.item.attempts || 0;
+    const res = { id: o.item.id, key: o.key, system: o.item.type === 'system', attempts: attempts, status: r.status, outcome: MBX.classifyStatus(r.status) };
+    if (res.outcome === 'retry') {
+      res.attempts = attempts + 1;
+      res.nextTryAt = now + MBX.nextRetryDelayMs(attempts, r.retryAfterSec);
+      if (r.status === 0 || r.status === 429) stop = { status: r.status, nextTryAt: res.nextTryAt };
+    }
+    results.push(res);
   }
 
   await runSerial(async function () {
@@ -366,7 +401,7 @@ async function flushPass(now) {
       } else {
         queue = queue.map(function (it) {
           return it.id !== r.id ? it : Object.assign({}, it, {
-            attempts: r.attempts + 1, nextTryAt: now + MBX.nextRetryDelayMs(r.attempts, r.retryAfterSec)
+            attempts: r.attempts, nextTryAt: r.nextTryAt
           });
         });
       }
@@ -419,6 +454,30 @@ handlers.SEND_TEST_SLACK = async function () {
   return { ok: false, status: r.status, code: 'CONFIG', message: '설정 오류(HTTP ' + r.status + '): Webhook 주소를 확인하세요' };
 };
 
+// ---- 보류 해제 ----
+// 직렬 큐 안에서 holdUntil 이 지난 항목을 ready 로 바꾼다. 바뀐 것이 없으면 저장하지 않는다.
+async function releaseDueStep() {
+  const st = await loadState(['slackQueue', 'recentCountAlerts']);
+  const queue = Array.isArray(st.slackQueue) ? st.slackQueue : [];
+  const recent = Array.isArray(st.recentCountAlerts) ? st.recentCountAlerts : [];
+  const next = MBX.releaseDue({ queue: queue, recent: recent }, Date.now());
+  if (JSON.stringify(next.queue) === JSON.stringify(queue) && JSON.stringify(next.recent) === JSON.stringify(recent)) return;
+  await saveState({ slackQueue: next.queue, recentCountAlerts: next.recent });
+}
+
+// 큐 밖에서 부른다(큐 안에서 부르면 교착된다).
+function releaseAndFlush() {
+  return runSerial(releaseDueStep)
+    .catch(function () { console.debug('release failed'); })
+    .then(function () { return flushQueue(Date.now()); })
+    .catch(function () { console.debug('flush after release failed'); });
+}
+
+// 타이머는 service worker 가 종료되면 사라진다. 그래서 시작 시, 모든 메시지, 알람에서도 해제한다.
+function scheduleHoldRelease() {
+  setTimeout(releaseAndFlush, MBX.HOLD_MS + 50);
+}
+
 // ---- 알람과 시작 시 처리 ----
 function ensureAlarm() {
   chrome.alarms.get(ALARM_NAME).then(function (a) {
@@ -429,7 +488,12 @@ chrome.runtime.onInstalled.addListener(ensureAlarm);
 chrome.runtime.onStartup.addListener(ensureAlarm);
 chrome.alarms.onAlarm.addListener(function (alarm) {
   if (alarm.name !== ALARM_NAME) return;
-  flushQueue(Date.now()).catch(function () { console.debug('alarm flush failed'); });
+  releaseAndFlush();
 });
 ensureAlarm();
-flushQueue(Date.now()).catch(function () { console.debug('start flush failed'); });
+// 저장된 lastError 로 아이콘 배지를 맞춘다(service worker 가 다시 떠도 '!' 가 유지된다).
+runSerial(async function () {
+  const { lastError } = await loadState(['lastError']);
+  setActionBadge(lastError ? '!' : '');
+}).catch(function () { console.debug('badge sync failed'); });
+releaseAndFlush();
