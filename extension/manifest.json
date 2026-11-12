@@ -34,7 +34,8 @@
       "js": [
         "lib/constants.js",
         "content/selectors.js",
-        "content/util.js"
+        "content/util.js",
+        "content/composer.js"
       ],
       "css": [
         "content/content.css"

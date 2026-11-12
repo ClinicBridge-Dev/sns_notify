@@ -157,6 +157,18 @@
     return !!s && s === btn;
   }
 
+  // Meta의 대화상자가 열려 있는지. 입력창을 포함하는 role="dialog"는 세지 않는다.
+  function dialogOpen() {
+    if (typeof document === 'undefined') return false;
+    const c = composer();
+    const ds = document.querySelectorAll('[role="dialog"]');
+    for (let i = 0; i < ds.length; i++) {
+      if (c && ds[i].contains(c)) continue;
+      if (ds[i].getClientRects().length > 0) return true;
+    }
+    return false;
+  }
+
   function searchValue() {
     if (typeof document === 'undefined') return null;
     for (let i = 0; i < SEARCH_SELECTORS.length; i++) {
@@ -169,6 +181,6 @@
   root.sel = {
     assetIdFrom, threadIdFrom, channelFromPath, parseBadgeText, labelMatches,
     channelTabs, badgeOf, listContainer, listItems, listScrollTop, messageRegion,
-    bubbleFrom, bubbleTextEl, composer, submitButton, isSubmitButton, searchValue
+    bubbleFrom, bubbleTextEl, composer, submitButton, isSubmitButton, searchValue, dialogOpen
   };
 })(typeof module !== 'undefined' && module.exports ? module.exports : (self.MBX = self.MBX || {}));

@@ -1,4 +1,4 @@
-importScripts('lib/constants.js', 'lib/settings.js', 'lib/serial.js', 'lib/deepl.js');
+importScripts('lib/constants.js', 'lib/settings.js', 'lib/serial.js', 'lib/deepl.js', 'lib/threadlang.js');
 
 const MBX = self.MBX;
 const runSerial = MBX.createSerialQueue();
@@ -66,6 +66,23 @@ handlers.GET_QUICK_REPLIES = async function () {
   const { quickReplies } = await loadState(['quickReplies']);
   const qr = quickReplies || {};
   return { version: 1, items: Array.isArray(qr.items) ? qr.items : [] };
+};
+
+// 대화별 번역 언어. 직렬 큐 안에서 읽고 쓴다. 응답에 threadId를 함께 돌려준다(content가 현재 대화와 비교한다).
+handlers.SET_THREAD_LANG = async function (msg) {
+  if (typeof msg.threadId !== 'string' || !msg.threadId || typeof msg.lang !== 'string' || !msg.lang) {
+    return { ok: false, code: 'REJECTED' };
+  }
+  const { threadLangs } = await loadState(['threadLangs']);
+  await saveState({ threadLangs: MBX.setThreadLang(threadLangs, msg.threadId, msg.lang, Date.now(), MBX.THREAD_LANG_CAP) });
+  return { ok: true };
+};
+
+handlers.GET_THREAD_LANG = async function (msg) {
+  if (typeof msg.threadId !== 'string' || !msg.threadId) return { ok: false, code: 'REJECTED' };
+  const st = await loadState(['threadLangs', 'settings']);
+  const full = Object.assign({}, MBX.DEFAULT_SETTINGS, st.settings);
+  return { threadId: msg.threadId, lang: MBX.getThreadLang(st.threadLangs, msg.threadId, full.sendTargetLang) };
 };
 
 handlers.OPEN_OPTIONS = async function () {
