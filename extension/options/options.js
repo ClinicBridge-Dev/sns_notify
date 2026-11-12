@@ -340,11 +340,50 @@
     });
   }
 
+  // 테스트 메시지: service worker 가 대기열에 넣고 바로 보낸 결과를 돌려받는다.
+  function initSlackTest() {
+    const btn = $('btn-test-slack');
+    btn.disabled = false;
+    btn.removeAttribute('title');
+    btn.addEventListener('click', async function () {
+      const out = $('test-slack-result');
+      btn.disabled = true;
+      setMsg(out, '보내는 중...');
+      try {
+        const r = await chrome.runtime.sendMessage({ type: 'SEND_TEST_SLACK' });
+        if (r && r.ok) setMsg(out, 'Slack으로 보냈습니다');
+        else setMsg(out, (r && r.message) || '보내지 못했습니다', true);
+      } catch (e) {
+        setMsg(out, '보내지 못했습니다', true);
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  }
+
+  // 상태 영역의 최근 오류. 저장소가 바뀌면 다시 그린다.
+  async function renderLastError() {
+    const { lastError } = await chrome.storage.local.get(['lastError']);
+    const el = $('status-error');
+    if (!lastError) { setMsg(el, '-'); return; }
+    const when = lastError.at ? new Date(lastError.at).toLocaleString() + ' ' : '';
+    setMsg(el, when + (lastError.message || lastError.code || '오류'), true);
+  }
+
+  function initLastError() {
+    renderLastError().catch(function () { console.debug('status render failed'); });
+    chrome.storage.onChanged.addListener(function (changes, area) {
+      if (area === 'local' && changes.lastError) renderLastError().catch(function () { console.debug('status render failed'); });
+    });
+  }
+
   self.MBX_OPTIONS = { loadSettings: loadSettings, saveSettings: saveSettings };
 
   if (typeof document !== 'undefined' && typeof chrome !== 'undefined' && chrome.storage) {
     initQuickReplies().catch(function () { console.debug('quick replies init failed'); });
     initDeeplCheck();
+    initSlackTest();
+    initLastError();
     initSettings().catch(function () { console.debug('settings init failed'); });
   }
 })();

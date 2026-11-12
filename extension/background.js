@@ -1,11 +1,11 @@
-importScripts('lib/constants.js', 'lib/settings.js', 'lib/serial.js', 'lib/deepl.js', 'lib/threadlang.js', 'lib/badge.js', 'lib/listcand.js');
+importScripts('lib/constants.js', 'lib/settings.js', 'lib/serial.js', 'lib/deepl.js', 'lib/threadlang.js', 'lib/badge.js', 'lib/listcand.js', 'lib/slack.js');
 
 const MBX = self.MBX;
 const runSerial = MBX.createSerialQueue();
 
 // 직렬 큐를 거치지 않는 핸들러. 저장소를 읽고 쓰지 않고 오래 걸리는 외부 호출만 하는 것에 한해 쓴다.
 // sender 검사와 isAllowed 검사는 큐를 쓰는 핸들러와 똑같이 거친다.
-const UNQUEUED_TYPES = ['TRANSLATE', 'CHECK_DEEPL_KEY'];
+const UNQUEUED_TYPES = ['TRANSLATE', 'CHECK_DEEPL_KEY', 'SEND_TEST_SLACK'];
 
 // handlers[type] = async (msg, sender) => response. 이후 Task는 여기에 핸들러만 추가한다.
 const handlers = {};
@@ -149,7 +149,9 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
     .catch(function () {
       console.debug('handler failed', type);
       sendResponse({ ok: false, code: 'INTERNAL' });
-    });
+    })
+    .then(function () { return flushQueue(Date.now()); }) // 처리한 메시지마다 전송 대기 항목을 확인한다(응답은 이미 보냈다)
+    .catch(function () { console.debug('flush after message failed'); });
   return true;
 });
 
@@ -248,3 +250,186 @@ handlers.HEARTBEAT = async function (msg) {
   console.debug('heartbeat', !!msg.ok, typeof msg.reason === 'string' ? msg.reason : null);
   return { ok: true };
 };
+
+// ---- Slack 전송 대기열(기획서 6-3, 6-4) ----
+const ALARM_NAME = 'mbx-tick';
+const SLACK_TIMEOUT_MS = 10000;
+const NOT_CONFIGURED_MESSAGE = 'Slack 알림이 꺼져 있거나 Webhook 주소가 비어 있습니다. 설정에서 확인하세요';
+
+function newItemId() {
+  return (self.crypto && crypto.randomUUID) ? crypto.randomUUID() : 'q-' + Date.now() + '-' + Math.random().toString(36).slice(2);
+}
+
+function setActionBadge(text) {
+  try { chrome.action.setBadgeText({ text: text }); } catch (e) { console.debug('badge failed'); }
+}
+
+// 오류 기록에는 Webhook 주소와 메시지 본문을 넣지 않는다.
+function slackError(code, message, status) {
+  return { source: 'slack', code: code, message: message, status: status === undefined ? null : status, at: Date.now() };
+}
+
+// 호출자가 직렬 큐 안에 있어야 한다(저장소 읽기·쓰기를 가른다). 큐 밖에서는 runSerial(() => enqueue(item))로 부른다.
+// 대기열에 넣었으면 true, 설정이 없어 넣지 않았으면 false(lastError 에 기록).
+async function enqueue(item) {
+  const st = await loadState(['settings', 'slackQueue']);
+  const full = Object.assign({}, MBX.DEFAULT_SETTINGS, st.settings);
+  if (!full.slackEnabled || !full.slackWebhookUrl) {
+    await saveState({ lastError: slackError('NOT_CONFIGURED', NOT_CONFIGURED_MESSAGE) });
+    return false;
+  }
+  const entry = Object.assign({
+    id: newItemId(), createdAt: Date.now(), status: 'ready', holdUntil: null, attempts: 0, nextTryAt: 0
+  }, item);
+  await saveState({ slackQueue: (Array.isArray(st.slackQueue) ? st.slackQueue : []).concat([entry]) });
+  return true;
+}
+
+// 전송 결과(id -> {outcome, status}). SEND_TEST_SLACK 이 자기 항목의 결과를 읽는 용도이며 캐시일 뿐이다.
+const sendResults = new Map();
+
+async function postSlack(url, payload) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(function () { ctrl.abort(); }, SLACK_TIMEOUT_MS);
+  try {
+    const res = await fetch(url, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), signal: ctrl.signal
+    });
+    const ra = Number(res.headers.get('Retry-After'));
+    return { status: res.status, retryAfterSec: Number.isFinite(ra) && ra > 0 ? ra : null };
+  } catch (e) {
+    return { status: 0, retryAfterSec: null }; // 네트워크 오류, 시간 초과
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// 1단계(큐 안): 만료 폐기, 중복 폐기, 보낼 항목 선택. 2단계(큐 밖): fetch. 3단계(큐 안): 결과 반영.
+async function flushPass(now) {
+  const picked = await runSerial(async function () {
+    const st = await loadState(['slackQueue', 'sentKeys', 'settings']);
+    const full = Object.assign({}, MBX.DEFAULT_SETTINGS, st.settings);
+    const sentKeys = MBX.pruneSentKeys(Array.isArray(st.sentKeys) ? st.sentKeys : [], now);
+    let queue = (Array.isArray(st.slackQueue) ? st.slackQueue : []).filter(function (it) { return now - it.createdAt < MBX.QUEUE_TTL_MS; });
+    const patch = { sentKeys: sentKeys };
+    const out = [];
+    const seen = {};
+    queue = queue.filter(function (it) {
+      if (it.status !== 'ready' || it.nextTryAt > now) return true;
+      const key = MBX.dedupKey(it, now);
+      if (it.type !== 'system' && (MBX.isDuplicate(sentKeys, key, now) || seen[key])) return false; // 중복은 폐기
+      seen[key] = true;
+      out.push({ item: it, key: key });
+      return true;
+    });
+    if (out.length && (!full.slackEnabled || !full.slackWebhookUrl)) {
+      // 대기 중에 설정이 꺼졌거나 지워졌다. 보낼 곳이 없으므로 해당 항목을 버리고 설정 필요 상태를 남긴다.
+      const drop = {};
+      out.forEach(function (o) { drop[o.item.id] = true; });
+      patch.slackQueue = queue.filter(function (it) { return !drop[it.id]; });
+      patch.lastError = slackError('NOT_CONFIGURED', NOT_CONFIGURED_MESSAGE);
+      await saveState(patch);
+      setActionBadge('!');
+      return { list: [], url: '', settings: full };
+    }
+    patch.slackQueue = queue;
+    await saveState(patch);
+    return { list: out, url: full.slackWebhookUrl, settings: full };
+  });
+  if (!picked.list.length) return;
+
+  // 큐 밖: 직렬로 하나씩 보낸다(Slack Webhook 은 초당 1건 안팎이 기준이다).
+  const results = [];
+  for (const o of picked.list) {
+    const r = await postSlack(picked.url, MBX.buildSlackPayload(o.item, picked.settings, now));
+    console.debug('slack send', r.status);
+    results.push({ id: o.item.id, key: o.key, system: o.item.type === 'system', attempts: o.item.attempts || 0, status: r.status, retryAfterSec: r.retryAfterSec, outcome: MBX.classifyStatus(r.status) });
+  }
+
+  await runSerial(async function () {
+    const st = await loadState(['slackQueue', 'sentKeys', 'lastError']);
+    let queue = Array.isArray(st.slackQueue) ? st.slackQueue : [];
+    let sentKeys = Array.isArray(st.sentKeys) ? st.sentKeys : [];
+    const patch = {};
+    let badge = null;
+    let lastError = st.lastError;
+    results.forEach(function (r) {
+      sendResults.set(r.id, { outcome: r.outcome, status: r.status });
+      if (r.outcome === 'ok') {
+        queue = queue.filter(function (it) { return it.id !== r.id; });
+        if (!r.system) sentKeys = sentKeys.concat([{ key: r.key, at: now }]);
+        if (lastError && lastError.source === 'slack') { lastError = null; badge = ''; }
+      } else if (r.outcome === 'config') {
+        queue = queue.filter(function (it) { return it.id !== r.id; });
+        lastError = slackError('CONFIG', '설정 오류(HTTP ' + r.status + '): Webhook 주소를 확인하세요. 재시도하지 않습니다', r.status);
+        badge = '!';
+      } else {
+        queue = queue.map(function (it) {
+          return it.id !== r.id ? it : Object.assign({}, it, {
+            attempts: r.attempts + 1, nextTryAt: now + MBX.nextRetryDelayMs(r.attempts, r.retryAfterSec)
+          });
+        });
+      }
+    });
+    patch.slackQueue = queue;
+    patch.sentKeys = sentKeys;
+    if (lastError !== st.lastError) patch.lastError = lastError;
+    await saveState(patch);
+    if (badge !== null) setActionBadge(badge);
+  });
+}
+
+// 동시에 두 번 돌면 같은 항목을 둘 다 보낼 수 있다(선택과 결과 반영 사이에 fetch 가 끼어 있기 때문).
+// 그래서 모듈 수준의 진행 중 약속 하나로 합친다. 실행 중에 다시 불리면 끝난 뒤 한 번 더 돈다.
+// 저장소에 "전송 중" 표시를 두지 않는 이유: service worker 가 fetch 도중 종료되면 표시가 남아 항목이 영원히 막힌다.
+// 종료되면 진행 중 약속도 함께 사라지므로, 새 인스턴스는 그 항목을 다시 보낸다(중복이 누락보다 낫다).
+let flushing = null;
+let flushDirty = false;
+function flushQueue(now) {
+  if (flushing) { flushDirty = true; return flushing; }
+  flushing = (async function () {
+    let t = typeof now === 'number' ? now : Date.now();
+    try {
+      do {
+        flushDirty = false;
+        try { await flushPass(t); } catch (e) { console.debug('flush failed'); }
+        t = Date.now();
+      } while (flushDirty);
+    } finally {
+      flushing = null;
+    }
+  })();
+  return flushing;
+}
+
+handlers.SEND_TEST_SLACK = async function () {
+  const item = {
+    id: newItemId(), type: 'system', channel: '', count: 0, kind: 'new', manualHint: false, sender: null, preview: null, time: null,
+    text: '[Meta Inbox Helper] 테스트 메시지입니다. 이 메시지가 보이면 Slack 연결이 정상입니다.',
+    createdAt: Date.now(), status: 'ready', holdUntil: null, attempts: 0, nextTryAt: 0
+  };
+  const queued = await runSerial(function () { return enqueue(item); });
+  if (!queued) return { ok: false, status: null, code: 'NOT_CONFIGURED', message: NOT_CONFIGURED_MESSAGE };
+  await flushQueue(Date.now());
+  const r = sendResults.get(item.id);
+  sendResults.delete(item.id);
+  if (!r) return { ok: false, status: null, code: 'PENDING', message: '전송 결과를 확인하지 못했습니다. 잠시 뒤 다시 확인하세요' };
+  if (r.outcome === 'ok') return { ok: true, status: r.status };
+  if (r.outcome === 'retry') return { ok: false, status: r.status, code: 'RETRY', message: '전송하지 못했습니다(' + (r.status ? 'HTTP ' + r.status : '네트워크 오류') + '). 자동으로 다시 시도합니다' };
+  return { ok: false, status: r.status, code: 'CONFIG', message: '설정 오류(HTTP ' + r.status + '): Webhook 주소를 확인하세요' };
+};
+
+// ---- 알람과 시작 시 처리 ----
+function ensureAlarm() {
+  chrome.alarms.get(ALARM_NAME).then(function (a) {
+    if (!a) chrome.alarms.create(ALARM_NAME, { periodInMinutes: 1 });
+  }).catch(function () { console.debug('alarm ensure failed'); });
+}
+chrome.runtime.onInstalled.addListener(ensureAlarm);
+chrome.runtime.onStartup.addListener(ensureAlarm);
+chrome.alarms.onAlarm.addListener(function (alarm) {
+  if (alarm.name !== ALARM_NAME) return;
+  flushQueue(Date.now()).catch(function () { console.debug('alarm flush failed'); });
+});
+ensureAlarm();
+flushQueue(Date.now()).catch(function () { console.debug('start flush failed'); });
