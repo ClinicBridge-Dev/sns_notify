@@ -340,7 +340,7 @@
     });
   }
 
-  // 테스트 메시지: service worker 가 대기열에 넣고 바로 보낸 결과를 돌려받는다.
+  // 테스트 메시지: service worker 가 대기열을 거치지 않고 바로 보낸 결과를 돌려받는다(실패해도 재시도하지 않는다).
   function initSlackTest() {
     const btn = $('btn-test-slack');
     btn.disabled = false;

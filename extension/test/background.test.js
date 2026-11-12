@@ -13,6 +13,7 @@ function makeEnv(initial) {
   const writes = [];
   const badgeTexts = [];
   const fetches = [];
+  let fetchStatus = 200;
   const L = { msg: [], changed: [], connect: [], removed: [], startup: [], installed: [], alarm: [] };
   const ev = (arr) => ({ addListener: (f) => arr.push(f) });
   const clone = (v) => (v === undefined ? undefined : JSON.parse(JSON.stringify(v)));
@@ -41,7 +42,11 @@ function makeEnv(initial) {
   const ctx = {
     chrome, console: { debug() {}, log() {} },
     setTimeout: () => 0, clearTimeout() {}, // 보류 해제 타이머 등은 돌리지 않는다
-    fetch: async (url, init) => { fetches.push(JSON.parse(init.body)); return { status: 200, ok: true, headers: { get: () => null } }; },
+    fetch: async (url, init) => {
+      fetches.push(JSON.parse(init.body));
+      if (fetchStatus === 0) throw new TypeError('Failed to fetch');
+      return { status: fetchStatus, ok: fetchStatus === 200, headers: { get: () => null } };
+    },
     crypto: { randomUUID: () => 'id-' + Math.random().toString(36).slice(2) },
     AbortController, URL, Promise, Date, Math, JSON, Object, Array, Number, String, Set, Map
   };
@@ -62,7 +67,8 @@ function makeEnv(initial) {
     await chrome.storage.local.set({ settings: s });
     await settle();
   }
-  return { store: () => store, writes, badgeTexts, fetches, send, tabSender, settle, setSettings };
+  const setFetchStatus = (st) => { fetchStatus = st; };
+  return { store: () => store, writes, badgeTexts, fetches, send, tabSender, settle, setSettings, setFetchStatus };
 }
 
 const SETTINGS = (o) => Object.assign({
@@ -165,4 +171,41 @@ test('Ruling 11: two +1 badge events in the same minute are queued with distinct
   const K = require('../lib/slack.js');
   const now = Date.now();
   assert.notEqual(K.dedupKey(q[0], now), K.dedupKey(q[1], now));
+});
+
+const optionsSender = { id: EXT_ID, url: 'chrome-extension://' + EXT_ID + '/options/options.html' };
+
+test('test message is sent directly, never queued, even when the send fails', async () => {
+  for (const status of [0, 429, 503]) {
+    const env = makeEnv({ settings: SETTINGS() });
+    await env.settle();
+    env.setFetchStatus(status);
+    const r = await env.send({ type: 'SEND_TEST_SLACK' }, optionsSender);
+    assert.equal(r.ok, false);
+    assert.equal(r.code, 'FAILED');
+    assert.equal(env.fetches.length, 1);
+    assert.deepEqual(env.store().slackQueue || [], [], 'failed test message must not wait in the retry queue');
+  }
+});
+
+test('test message config error is reported and recorded, not queued', async () => {
+  const env = makeEnv({ settings: SETTINGS() });
+  await env.settle();
+  env.setFetchStatus(404);
+  const r = await env.send({ type: 'SEND_TEST_SLACK' }, optionsSender);
+  assert.equal(r.ok, false);
+  assert.equal(r.code, 'CONFIG');
+  assert.deepEqual(env.store().slackQueue || [], []);
+  assert.equal(env.store().lastError.code, 'CONFIG');
+});
+
+test('test message success clears a previous Slack error and leaves the queue alone', async () => {
+  const queued = { id: 'q1', type: 'badge', channel: 'wec', count: 1, badgeValue: 1, kind: 'new', manualHint: false, sender: null, preview: null, time: null, createdAt: Date.now(), status: 'hold', holdUntil: Date.now() + 60000, attempts: 0, nextTryAt: 0 };
+  const env = makeEnv({ settings: SETTINGS(), slackQueue: [queued], lastError: { source: 'slack', code: 'CONFIG', message: 'x', status: 404, at: 1 } });
+  await env.settle();
+  const r = await env.send({ type: 'SEND_TEST_SLACK' }, optionsSender);
+  assert.equal(r.ok, true);
+  assert.equal(env.fetches.length, 1);
+  assert.deepEqual(env.store().slackQueue.map((q) => q.id), ['q1']);
+  assert.equal(env.store().lastError, null);
 });

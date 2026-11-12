@@ -570,9 +570,6 @@ async function enqueue(item) {
   return 'queued';
 }
 
-// 전송 결과(id -> {outcome, status}). SEND_TEST_SLACK 이 자기 항목의 결과를 읽는 용도이며 캐시일 뿐이다.
-const sendResults = new Map();
-
 async function postSlack(url, payload) {
   const ctrl = new AbortController();
   const timer = setTimeout(function () { ctrl.abort(); }, SLACK_TIMEOUT_MS);
@@ -654,7 +651,6 @@ async function flushPass(now) {
     let badge = null;
     let lastError = st.lastError;
     results.forEach(function (r) {
-      sendResults.set(r.id, { outcome: r.outcome, status: r.status });
       patch.lastSend = { at: now, outcome: r.outcome, status: r.status };
       if (r.outcome === 'ok') {
         queue = queue.filter(function (it) { return it.id !== r.id; });
@@ -703,22 +699,37 @@ function flushQueue(now) {
   return flushing;
 }
 
+// 테스트 메시지는 대기열에 넣지 않고 바로 보낸다. 실패하면 그 자리에서 실패로 알리고 끝낸다(재시도하지 않는다).
+// 대기열을 거치면 연결이 막혀 있던 동안 누른 테스트가 나중에 한꺼번에 나간다.
 handlers.SEND_TEST_SLACK = async function () {
+  const st = await runSerial(function () { return loadState(['settings']); });
+  const full = Object.assign({}, MBX.DEFAULT_SETTINGS, st.settings);
+  const cfg = MBX.slackConfigState(full);
+  if (cfg === 'disabled') return { ok: false, status: null, code: 'DISABLED', message: DISABLED_MESSAGE };
+  if (cfg === 'missing') {
+    await runSerial(markNotConfigured);
+    return { ok: false, status: null, code: 'NOT_CONFIGURED', message: NOT_CONFIGURED_MESSAGE };
+  }
+  const now = Date.now();
   const item = {
     id: newItemId(), type: 'system', channel: '', count: 0, kind: 'new', manualHint: false, sender: null, preview: null, time: null,
     text: '[Meta Inbox Helper] 테스트 메시지입니다. 이 메시지가 보이면 Slack 연결이 정상입니다.',
-    createdAt: Date.now(), status: 'ready', holdUntil: null, attempts: 0, nextTryAt: 0
+    createdAt: now
   };
-  const queued = await runSerial(function () { return enqueue(item); });
-  if (queued === 'disabled') return { ok: false, status: null, code: 'DISABLED', message: DISABLED_MESSAGE };
-  if (queued !== 'queued') return { ok: false, status: null, code: 'NOT_CONFIGURED', message: NOT_CONFIGURED_MESSAGE };
-  await flushQueue(Date.now());
-  const r = sendResults.get(item.id);
-  sendResults.delete(item.id);
-  if (!r) return { ok: false, status: null, code: 'PENDING', message: '전송 결과를 확인하지 못했습니다. 잠시 뒤 다시 확인하세요' };
-  if (r.outcome === 'ok') return { ok: true, status: r.status };
-  if (r.outcome === 'retry') return { ok: false, status: r.status, code: 'RETRY', message: '전송하지 못했습니다(' + (r.status ? 'HTTP ' + r.status : '네트워크 오류') + '). 자동으로 다시 시도합니다' };
-  return { ok: false, status: r.status, code: 'CONFIG', message: '설정 오류(HTTP ' + r.status + '): Webhook 주소를 확인하세요' };
+  const r = await postSlack(full.slackWebhookUrl, MBX.buildSlackPayload(item, full, now));
+  console.debug('slack test send', r.status);
+  const outcome = MBX.classifyStatus(r.status);
+  await runSerial(async function () {
+    const cur = await loadState(['lastError']);
+    const patch = { lastSend: { at: now, outcome: outcome, status: r.status } };
+    if (outcome === 'ok' && cur.lastError && cur.lastError.source === 'slack') patch.lastError = null;
+    if (outcome === 'config') patch.lastError = slackError('CONFIG', '설정 오류(HTTP ' + r.status + '): Webhook 주소를 확인하세요. 재시도하지 않습니다', r.status);
+    await saveState(patch);
+    if ('lastError' in patch) setActionBadge(outcome === 'ok' ? '' : '!');
+  });
+  if (outcome === 'ok') return { ok: true, status: r.status };
+  if (outcome === 'config') return { ok: false, status: r.status, code: 'CONFIG', message: '설정 오류(HTTP ' + r.status + '): Webhook 주소를 확인하세요' };
+  return { ok: false, status: r.status, code: 'FAILED', message: '전송하지 못했습니다(' + (r.status ? 'HTTP ' + r.status : '네트워크 오류') + '). 다시 보내려면 버튼을 한 번 더 누르세요' };
 };
 
 // ---- 보류 해제 ----
