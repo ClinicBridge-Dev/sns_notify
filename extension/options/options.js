@@ -326,10 +326,29 @@
     });
   }
 
+  function initDeeplCheck() {
+    $('btn-check-deepl').addEventListener('click', async function () {
+      const out = $('deepl-check-result');
+      const btn = $('btn-check-deepl');
+      btn.disabled = true;
+      setMsg(out, '확인 중...');
+      try {
+        const r = await chrome.runtime.sendMessage({ type: 'CHECK_DEEPL_KEY' });
+        if (r && r.ok) setMsg(out, '사용량 ' + Number(r.used).toLocaleString() + ' / ' + Number(r.limit).toLocaleString() + '자');
+        else setMsg(out, (r && r.message) || '확인하지 못했습니다', true);
+      } catch (e) {
+        setMsg(out, '확인하지 못했습니다', true);
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  }
+
   self.MBX_OPTIONS = { loadSettings: loadSettings, saveSettings: saveSettings };
 
   if (typeof document !== 'undefined' && typeof chrome !== 'undefined' && chrome.storage) {
     initQuickReplies().catch(function () { console.debug('quick replies init failed'); });
+    initDeeplCheck();
     initSettings().catch(function () { console.debug('settings init failed'); });
   }
 })();
