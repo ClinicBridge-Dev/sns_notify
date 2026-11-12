@@ -319,14 +319,17 @@ test('item 8: an unrelated Business page with a password field never reports a l
   assert.equal(e.noticeText(), null, 'no "detection stopped" notice on an unrelated page');
 }, { path: '/settings/security' }));
 
-test('item 8: a /login page opened directly (not from the inbox) does not report', () => withEnv((e) => {
+// 다시 로드된 로그인 화면은 이전에 수신함이었는지 스스로 알 수 없으므로 보고하고, service worker 가
+// inboxTabIds 로 거른다(background.test.js: 수신함이었던 적 없는 탭의 /login 보고는 경고하지 않음).
+test('item 8: a /login page (any referrer) reports; the service worker decides whether it was an inbox tab', () => withEnv((e) => {
   e.setSettings({ assetId: 'A1' });
   e.setBlocked('login'); e.mut();
-  e.advance(61000); e.hb();
-  assert.equal(loginHbs(e).length, 0);
-}, { path: '/login/', referrer: 'https://business.facebook.com/settings/' }));
+  e.advance(61000);
+  assert.equal(loginHbs(e).length, 1);
+  assert.equal(loginHbs(e)[0].path, '/login/');
+}, { path: '/login/', referrer: '' }));
 
-test('item 8: a /checkpoint page reached from the inbox (full navigation, referrer) reports login', () => withEnv((e) => {
+test('item 8: a /checkpoint page reports login', () => withEnv((e) => {
   e.setSettings({ assetId: 'A1' });
   e.setBlocked('login'); e.mut();
   e.advance(61000);
