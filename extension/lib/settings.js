@@ -54,6 +54,14 @@
     return { ok: true };
   }
 
+  // HELLO 응답의 role. 담당 지정(owner)은 이후 Task에서 한다.
+  function roleFor(settings, assetId) {
+    const configured = settings && typeof settings.assetId === 'string' ? settings.assetId.trim() : '';
+    if (!configured) return 'not_configured';
+    return configured === assetId ? 'standby' : 'other_account';
+  }
+
+  root.roleFor = roleFor;
   root.validateWebhookUrl = validateWebhookUrl;
   root.DEFAULT_SETTINGS = DEFAULT_SETTINGS;
   root.SECRET_KEYS = SECRET_KEYS;

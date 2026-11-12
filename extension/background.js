@@ -135,3 +135,44 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
     });
   return true;
 });
+
+// ---- content script 연결(port) ----
+// 연결된 port 목록은 캐시일 뿐이다(service worker가 종료되면 사라진다). 영속 상태는 Task 12에서 저장소에 둔다.
+const ports = new Set();
+
+function portIsContent(port) {
+  // classifySender 와 같은 기준: sender.id, sender.tab.url 이 business.facebook.com 인 content 만 받는다.
+  return MBX.classifySender(port.sender, chrome.runtime.id) === 'content';
+}
+
+async function handleHello(port, msg) {
+  if (!msg || msg.type !== 'HELLO' || !MBX.isAllowed('HELLO', 'content')) return;
+  const assetId = typeof msg.asset_id === 'string' ? msg.asset_id : '';
+  const { settings } = await loadState(['settings']);
+  const full = Object.assign({}, MBX.DEFAULT_SETTINGS, settings);
+  // 비밀값은 절대 넣지 않는다.
+  port.postMessage({ type: 'HELLO_REPLY', settings: MBX.publicSettings(full), role: MBX.roleFor(full, assetId) });
+}
+
+chrome.runtime.onConnect.addListener(function (port) {
+  if (!portIsContent(port)) { port.disconnect(); return; }
+  ports.add(port);
+  port.onDisconnect.addListener(function () { ports.delete(port); });
+  port.onMessage.addListener(function (msg) {
+    runSerial(function () { return handleHello(port, msg); })
+      .catch(function () { console.debug('hello failed'); });
+  });
+});
+
+// settings, quickReplies 가 바뀌면 연결된 탭에 알린다.
+chrome.storage.onChanged.addListener(function (changes, area) {
+  if (area !== 'local' || (!changes.settings && !changes.quickReplies)) return;
+  runSerial(async function () {
+    const { settings } = await loadState(['settings']);
+    const pub = MBX.publicSettings(Object.assign({}, MBX.DEFAULT_SETTINGS, settings));
+    const msg = { type: 'SETTINGS_CHANGED', settings: pub, quickRepliesChanged: !!changes.quickReplies };
+    ports.forEach(function (p) {
+      try { p.postMessage(msg); } catch (e) { ports.delete(p); }
+    });
+  }).catch(function () { console.debug('settings push failed'); });
+});

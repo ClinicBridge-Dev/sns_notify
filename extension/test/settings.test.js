@@ -49,3 +49,12 @@ test('validateWebhookUrl rejects lookalike hosts', () => {
   assert.equal(S.validateWebhookUrl('https://hooks.slack.com.evil.com/x').ok, false);
   assert.equal(S.validateWebhookUrl('https://hooks.slack.com@evil.com/x').ok, false);
 });
+
+test('roleFor: not_configured, other_account, standby', () => {
+  const { roleFor } = require('../lib/settings.js');
+  assert.equal(roleFor({ assetId: '' }, '1'), 'not_configured');
+  assert.equal(roleFor({}, '1'), 'not_configured');
+  assert.equal(roleFor({ assetId: '2' }, '1'), 'other_account');
+  assert.equal(roleFor({ assetId: '2' }, null), 'other_account');
+  assert.equal(roleFor({ assetId: '1' }, '1'), 'standby');
+});

@@ -1,0 +1,10 @@
+/* 호스트 요소 자체의 스타일만 둔다. 내부 UI 스타일은 Shadow DOM 안에 둔다. */
+mbx-root {
+  all: initial;
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  width: 0;
+  height: 0;
+  z-index: 1000; /* 본문보다 높고 Meta 팝업보다 낮게 */
+}
