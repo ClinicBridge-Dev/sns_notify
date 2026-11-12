@@ -64,3 +64,30 @@ test('joinFilterState is stable and drops empties', () => {
 test('HIDDEN_TAB_DOUBLE_OBSERVE constant is on', () => {
   assert.equal(require('../lib/constants.js').HIDDEN_TAB_DOUBLE_OBSERVE, true);
 });
+
+test('channel of an item icon alt and of a tab href', () => {
+  assert.equal(sel.channelOfIconAlt('WhatsApp'), 'wec');
+  assert.equal(sel.channelOfIconAlt('Instagram'), 'instagram_direct');
+  assert.equal(sel.channelOfIconAlt('Messenger'), null);
+  assert.equal(sel.channelOfHref('/latest/inbox/wec?asset_id=1'), 'wec');
+  assert.equal(sel.channelOfHref('https://business.facebook.com/latest/inbox/instagram_direct?asset_id=1'), 'instagram_direct');
+  assert.equal(sel.channelOfHref('/latest/inbox/all?asset_id=1'), 'all');
+  assert.equal(sel.channelOfHref(null), null);
+});
+
+test('blocked path heuristics for login, checkpoint and two-step screens', () => {
+  assert.equal(sel.isBlockedPath('/login/'), true);
+  assert.equal(sel.isBlockedPath('/login.php'), true);
+  assert.equal(sel.isBlockedPath('/checkpoint/123'), true);
+  assert.equal(sel.isBlockedPath('/two_step_verification/two_factor'), true);
+  assert.equal(sel.isBlockedPath('/latest/inbox/wec'), false);
+  assert.equal(sel.isBlockedPath('/loginsomething'), false);
+});
+
+test('new DOM helpers are safe without a document', () => {
+  assert.equal(sel.channelTabArea(), null);
+  assert.deepEqual(sel.channelBadges(), null);
+  assert.deepEqual(sel.itemLines(null), []);
+  assert.equal(sel.itemChannel(null), null);
+  assert.equal(sel.blockedScreen(), null);
+});

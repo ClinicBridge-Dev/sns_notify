@@ -33,11 +33,13 @@
       ],
       "js": [
         "lib/constants.js",
+        "lib/listcand.js",
         "lib/bubblecache.js",
         "content/selectors.js",
         "content/util.js",
         "content/composer.js",
-        "content/bubbles.js"
+        "content/bubbles.js",
+        "content/watcher.js"
       ],
       "css": [
         "content/content.css"

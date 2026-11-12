@@ -88,3 +88,13 @@ test('does not mutate the input state', () => {
   handleBadgeState(state, { badges: { instagram_direct: 0, wec: 2 }, initial: false, at: 0 }, 0);
   assert.deepEqual(state, copy);
 });
+
+test('event at falls back to now when the report time is not a finite number', () => {
+  const state = { channels: { instagram_direct: ch(0), wec: ch(0) } };
+  for (const at of [undefined, 'x', NaN, Infinity, null]) {
+    const r = handleBadgeState(state, { badges: { instagram_direct: 0, wec: 1 }, initial: false, userActionRecent: false, at }, 777);
+    assert.equal(r.events[0].at, 777);
+  }
+  const r = handleBadgeState(state, { badges: { instagram_direct: 0, wec: 1 }, initial: false, at: 5 }, 777);
+  assert.equal(r.events[0].at, 5);
+});

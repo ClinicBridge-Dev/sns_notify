@@ -32,6 +32,7 @@
     if (!validReport(msg)) return { state: state, events: [] };
     const channels = Object.assign({}, state.channels);
     const events = [];
+    const at = (typeof msg.at === 'number' && Number.isFinite(msg.at)) ? msg.at : now;
     CHANNELS.forEach(function (c) {
       const cur = channels[c] || { base: 0, known: false, pending: null };
       const r = applyBadgeReport(cur, msg.badges[c], now, CONSTS.DROP_WAIT_MS);
@@ -39,7 +40,7 @@
       if (r.event) {
         events.push({
           channel: c, count: r.event.count, kind: msg.initial ? 'away' : 'new',
-          manualHint: !!msg.userActionRecent, at: msg.at
+          manualHint: !!msg.userActionRecent, at: at
         });
       }
     });

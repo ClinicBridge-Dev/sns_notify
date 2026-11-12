@@ -6,6 +6,10 @@
   const MESSAGE_LIST_LABEL_PREFIXES = ['Message list'];
   const CHANNEL_ICON_ALTS = ['WhatsApp', 'Instagram']; // U1 미확인: Instagram alt 값은 예상
   const SEARCH_SELECTORS = ['input[type="search"]', 'input[placeholder*="Search" i]']; // U11 미확인
+  const ICON_ALT_CHANNEL = { WhatsApp: 'wec', Instagram: 'instagram_direct' }; // U1 미확인: Instagram alt 값은 예상
+  // 금지 사항 9. 미확인: 실제 로그인·보안 확인·캡차 화면의 주소와 요소. 보수적으로 주소 접두와 비밀번호 입력란, 캡차 iframe 만 본다.
+  const BLOCKED_PATH_RE = /^\/(?:login(?:[/.?]|$)|checkpoint(?:\/|$)|two_step_verification(?:\/|$)|two_factor(?:\/|$))/;
+  const BLOCKED_SELECTORS = ['input[type="password"]', 'iframe[src*="captcha" i]', 'iframe[title*="captcha" i]'];
 
   const BASE = 'https://business.facebook.com';
 
@@ -223,9 +227,69 @@
     return null;
   }
 
+  // ---- 감지(watcher)용 ----
+  function channelOfIconAlt(alt) {
+    return Object.prototype.hasOwnProperty.call(ICON_ALT_CHANNEL, alt) ? ICON_ALT_CHANNEL[alt] : null;
+  }
+
+  function channelOfHref(href) {
+    if (typeof href !== 'string' || !href) return null;
+    const u = parseUrl(href);
+    return u ? channelFromPath(u.pathname) : null;
+  }
+
+  // 채널 탭 영역(관찰 대상). 못 찾으면 null.
+  function channelTabArea() {
+    const tabs = channelTabs();
+    return tabs.length ? tabs[0].closest('[role="tablist"]') : null;
+  }
+
+  // 두 채널 배지 값. 두 탭 모두 못 찾으면 null(0으로 읽어 기준값을 내리지 않게 한다). 한쪽만 있으면 다른 쪽은 0.
+  function channelBadges() {
+    const out = { instagram_direct: 0, wec: 0 };
+    let found = 0;
+    channelTabs().forEach(function (a) {
+      const c = channelOfHref(a.getAttribute('href'));
+      if (c === 'instagram_direct' || c === 'wec') { out[c] = badgeOf(a); found++; }
+    });
+    return found ? out : null;
+  }
+
+  // 목록 항목의 요약 줄. 호출한 쪽은 로그에 남기지 않는다.
+  function itemLines(itemEl) {
+    if (!itemEl) return [];
+    const t = itemEl.innerText || itemEl.textContent || '';
+    return t.split('\n').map(function (l) { return l.trim(); }).filter(function (l) { return l !== ''; });
+  }
+
+  function itemChannel(itemEl) {
+    if (!itemEl) return null;
+    const imgs = itemEl.querySelectorAll('img[alt]');
+    for (let i = 0; i < imgs.length; i++) {
+      const c = channelOfIconAlt(imgs[i].getAttribute('alt'));
+      if (c) return c;
+    }
+    return null;
+  }
+
+  function isBlockedPath(pathname) {
+    return typeof pathname === 'string' && BLOCKED_PATH_RE.test(pathname);
+  }
+
+  // 로그인·보안 확인·캡차 화면이면 'login', 아니면 null.
+  function blockedScreen() {
+    if (typeof document === 'undefined' || typeof location === 'undefined') return null;
+    if (isBlockedPath(location.pathname)) return 'login';
+    for (let i = 0; i < BLOCKED_SELECTORS.length; i++) {
+      if (document.querySelector(BLOCKED_SELECTORS[i])) return 'login';
+    }
+    return null;
+  }
+
   root.sel = {
     assetIdFrom, threadIdFrom, channelFromPath, parseBadgeText, labelMatches,
     channelTabs, badgeOf, listContainer, listItems, listScrollTop, filterState, joinFilterState, isListOrThreadMenu, messageRegion,
-    bubbleFrom, bubbleTextEl, composer, submitButton, isSubmitButton, searchValue, dialogOpen
+    bubbleFrom, bubbleTextEl, composer, submitButton, isSubmitButton, searchValue, dialogOpen,
+    channelOfIconAlt, channelOfHref, channelTabArea, channelBadges, itemLines, itemChannel, isBlockedPath, blockedScreen
   };
 })(typeof module !== 'undefined' && module.exports ? module.exports : (self.MBX = self.MBX || {}));

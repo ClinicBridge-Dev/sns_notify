@@ -1,4 +1,4 @@
-importScripts('lib/constants.js', 'lib/settings.js', 'lib/serial.js', 'lib/deepl.js', 'lib/threadlang.js', 'lib/badge.js');
+importScripts('lib/constants.js', 'lib/settings.js', 'lib/serial.js', 'lib/deepl.js', 'lib/threadlang.js', 'lib/badge.js', 'lib/listcand.js');
 
 const MBX = self.MBX;
 const runSerial = MBX.createSerialQueue();
@@ -216,14 +216,41 @@ function onBadgeEvent(ev) {
   console.debug('badge event', ev.channel, ev.count, ev.kind);
 }
 
+// 설정의 assetId가 비어 있지 않고 보고의 asset_id와 같을 때만 참.
+function assetMatches(full, msg) {
+  const target = typeof full.assetId === 'string' ? full.assetId.trim() : '';
+  return !!target && typeof msg.asset_id === 'string' && msg.asset_id === target;
+}
+
 // 직렬 큐 안에서 실행된다(onMessage 라우터). 담당 탭 검사는 Task 12에서 추가한다.
 handlers.BADGE_STATE = async function (msg) {
   const st = await loadState(['watcherState', 'settings']);
   const full = Object.assign({}, MBX.DEFAULT_SETTINGS, st.settings);
-  if (typeof msg.asset_id !== 'string' || msg.asset_id !== full.assetId) return { ok: false, code: 'REJECTED' };
+  if (!assetMatches(full, msg)) return { ok: false, code: 'REJECTED' };
   const r = MBX.handleBadgeState(st.watcherState || defaultState().watcherState, msg, Date.now());
   if (r.state === (st.watcherState)) return { ok: false, code: 'REJECTED' }; // 형식이 틀린 보고
   await saveState({ watcherState: r.state });
   r.events.forEach(onBadgeEvent);
+  return { ok: true };
+};
+
+// ---- 목록 후보(기획서 6-1 신호 2) ----
+// Task 11에서 결합 로직에 연결한다. 지금은 본문 없이 채널만 남긴다.
+function onListCandidate(cand) {
+  console.debug('list candidate', cand.channel);
+}
+
+// 직렬 큐 안에서 실행된다. 담당 여부와 관계없이 대상 계정의 탭이면 받는다.
+handlers.LIST_CANDIDATE = async function (msg) {
+  const full = await readFullSettings();
+  if (!assetMatches(full, msg) || !MBX.validCandidateMsg(msg)) return { ok: false, code: 'REJECTED' };
+  const at = (typeof msg.at === 'number' && Number.isFinite(msg.at)) ? msg.at : Date.now();
+  onListCandidate({ channel: msg.channel, sender: msg.sender, preview: msg.preview, time: msg.time, at: at });
+  return { ok: true };
+};
+
+// 생존 신호. 감시와 담당 갱신은 Task 12에서 구현한다. 지금은 라우터가 거부하지 않도록 받기만 한다.
+handlers.HEARTBEAT = async function (msg) {
+  console.debug('heartbeat', !!msg.ok, typeof msg.reason === 'string' ? msg.reason : null);
   return { ok: true };
 };

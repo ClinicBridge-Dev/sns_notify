@@ -1,0 +1,412 @@
+// R1 관찰과 보고(기획서 6-1, 6-5). 본 것을 그대로 service worker에 보낸다. 새 메시지 여부의 최종 판단은 service worker가 한다.
+// fetch와 chrome.storage는 쓰지 않는다. 목록을 스크롤하거나 클릭하지 않는다(금지 사항 3).
+// 로그는 console.debug만, 이름·미리보기 같은 본문은 넣지 않는다.
+(function (root) {
+  const sel = root.sel;
+  const util = root.util;
+  const L = root; // lib/listcand.js, lib/constants.js 가 MBX에 붙인 함수와 상수
+
+  // Task 12에서 제거한다. 담당 탭 선정 전 수동 확인용으로만 true로 바꾼다.
+  const DEBUG_FORCE_OWNER = false;
+
+  const POLL_MS = 60000;          // 관찰자가 끊겼을 때 대비한 보조 조회
+  const FAIL_AFTER_MS = 60000;    // 로그인 화면·선택자 실패·asset_id 없음이 이만큼 이어지면 알린다
+  const USER_ACTION_MS = 2000;    // userActionRecent 범위
+  const ATTACH_DELAY_MS = 200;
+  const SCROLL_DELAY_MS = 150;   // 스크롤·입력·클릭 모음
+  const NOTICE_OTHER = '알림 대상 계정이 아닙니다';
+  const NOTICE_UNSET = '설정에서 알림 대상 계정을 지정하세요';
+
+  let started = false;
+  let settle = null;              // { phase: 'load'|'change'|'ready', lastChange }
+  const known = new Set();        // 알고 있는 항목 키(메모리에만, 최대 KNOWN_CAP)
+  let stableKeys = [];            // 안정화 중 마지막으로 본 위쪽 항목 키. 안정화가 끝날 때 기억한다
+  let lastSig = null;             // 배지 + 위쪽 항목 키
+  let lastBadgeKey = null;        // 마지막으로 보낸 배지 값
+  let initialPending = true;      // 'load' 안정화 뒤 첫 배지 보고에 initial 표시
+  let account = 'unknown';        // 'match' | 'other' | 'unset' | 'none' | 'unknown'
+  let screenKey = null;           // 경로 + filterState()(검색어 포함)
+  let wasScrolledDown = false;
+  let blocked = false;
+  let lastUserActionAt = 0;
+  let listDirty = false;          // 'ready'에서 목록이 바뀌어 판단할 것이 있다
+  let debounceDue = false;
+  let confirmDue = false;
+  let prevCandKeys = null;        // 가려진 탭: 직전 관찰의 후보 키
+  let debounceTimer = null, confirmTimer = null, settleTimer = null, failTimer = null;
+  let attachTimer = null, scrollTimer = null; // scrollTimer: scheduleObserve 의 모음 타이머
+  let failSince = 0, failReported = false;
+  let observedTabs = null, observedList = null;
+  let mo = null;
+  let notice = null;
+
+  function isOwner() { return DEBUG_FORCE_OWNER || util.role() === 'owner'; }
+  function inInbox() { return sel.channelFromPath(location.pathname) !== null; }
+  function visible() { return document.visibilityState === 'visible'; }
+
+  function tabHrefs() {
+    return sel.channelTabs().map(function (a) { return a.getAttribute('href') || ''; });
+  }
+
+  // 보고를 만들 때마다 주소(없으면 탭 링크)에서 직접 읽는다.
+  function currentAssetId() { return sel.assetIdFrom(location.href, tabHrefs()); }
+
+  function targetAssetId() {
+    const s = util.settings();
+    if (!s) return null;
+    return typeof s.assetId === 'string' ? s.assetId.trim() : '';
+  }
+
+  function accountState() {
+    const target = targetAssetId();
+    if (target === null) return 'unknown';
+    if (!target) return 'unset';
+    const id = currentAssetId();
+    if (!id) return 'none';
+    return id === target ? 'match' : 'other';
+  }
+
+  // ---- 안내 표시(Shadow DOM, mbx- 접두) ----
+  function buildNotice() {
+    const h = util.host();
+    const style = document.createElement('style');
+    style.textContent =
+      '.mbx-wnotice{position:fixed;left:16px;bottom:16px;z-index:2147483000;display:none;align-items:center;gap:8px;' +
+      'max-width:320px;padding:6px 10px;border:1px solid #e0c36a;border-radius:6px;background:#fff8dc;color:#333;' +
+      'font:12px/1.4 system-ui,sans-serif;box-shadow:0 1px 4px rgba(0,0,0,.15)}' +
+      '.mbx-wnotice button{font:inherit;padding:2px 8px;border:1px solid #bbb;border-radius:4px;background:#fff;color:#222;cursor:pointer}';
+    h.appendChild(style);
+    const box = document.createElement('div');
+    box.className = 'mbx-wnotice';
+    const text = document.createElement('span');
+    text.className = 'mbx-wnotice-text';
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'mbx-wnotice-open';
+    btn.textContent = '설정 열기';
+    btn.addEventListener('click', function () { util.send('OPEN_OPTIONS'); });
+    box.appendChild(text);
+    box.appendChild(btn);
+    h.appendChild(box);
+    return { box: box, text: text, btn: btn };
+  }
+
+  function showNotice(kind) {
+    if (!kind) { if (notice) notice.box.style.display = 'none'; return; }
+    if (!notice) notice = buildNotice();
+    notice.text.textContent = kind === 'unset' ? NOTICE_UNSET : NOTICE_OTHER;
+    notice.btn.style.display = kind === 'unset' ? '' : 'none';
+    notice.box.style.display = 'flex';
+  }
+
+  // ---- 안정화 ----
+  function settleWait() { return settle.phase === 'load' ? L.SETTLE_LOAD_MS : L.SETTLE_CHANGE_MS; }
+
+  // 가려진 탭에서는 타이머가 늦으므로 관찰자 콜백마다 settleTick 으로도 확인한다. 이 타이머는 보조다.
+  function scheduleSettle() {
+    clearTimeout(settleTimer);
+    settleTimer = null;
+    if (settle.phase === 'ready') return;
+    const wait = Math.max(0, settleWait() - (Date.now() - settle.lastChange)) + 50;
+    settleTimer = setTimeout(function () { settleTimer = null; observe(); }, wait);
+  }
+
+  function clearListWork() {
+    clearTimeout(debounceTimer); debounceTimer = null;
+    clearTimeout(confirmTimer); confirmTimer = null;
+    listDirty = false; debounceDue = false; confirmDue = false; prevCandKeys = null;
+  }
+
+  function enterSettle(kind, now) {
+    settle = L.settleEnter(settle, kind, now);
+    if (settle.phase === 'load') initialPending = true;
+    clearListWork();
+    scheduleSettle();
+    console.debug('watcher settle', settle.phase);
+  }
+
+  // ---- 읽기 ----
+  function toItem(el, pathCh) {
+    const p = L.parseItemLines(sel.itemLines(el));
+    if (!p) return null;
+    let ch = sel.itemChannel(el);
+    if (!ch && (pathCh === 'wec' || pathCh === 'instagram_direct')) ch = pathCh;
+    if (!ch) return null; // /inbox/all 등에서 채널을 알 수 없는 항목은 건너뛴다
+    const it = { channel: ch, name: p.name, preview: p.preview, time: p.time };
+    it.key = L.itemKey(it);
+    return it;
+  }
+
+  function readTopItems() {
+    const pathCh = sel.channelFromPath(location.pathname);
+    const els = sel.listItems();
+    const out = [];
+    for (let i = 0; i < els.length && out.length < L.LIST_TOP_N; i++) {
+      const it = toItem(els[i], pathCh);
+      if (it) out.push(it);
+    }
+    return out;
+  }
+
+  // 목록이 내려가 있을 때: 화면에 보이는 항목만 읽어 기억한다.
+  function readVisibleKeys() {
+    const pathCh = sel.channelFromPath(location.pathname);
+    const h = window.innerHeight || 0;
+    const keys = [];
+    sel.listItems().forEach(function (el) {
+      const r = el.getBoundingClientRect();
+      if (r.bottom <= 0 || r.top >= h) return;
+      const it = toItem(el, pathCh);
+      if (it) keys.push(it.key);
+    });
+    return keys;
+  }
+
+  function keysOf(items) { return items.map(function (i) { return i.key; }); }
+
+  // ---- 상태 점검(생존 신호) ----
+  function health() {
+    if (sel.blockedScreen()) return { ok: false, reason: 'login' };
+    if (!inInbox()) return { ok: false, reason: null };
+    const acc = accountState();
+    if (acc === 'none') return { ok: false, reason: 'no_asset_id' };
+    if (acc !== 'match') return { ok: false, reason: null }; // 미설정·다른 계정·설정 수신 전: 보고하지 않는다
+    if (!sel.channelTabs().length || !sel.listContainer()) return { ok: false, reason: 'selector' };
+    return { ok: true, reason: null };
+  }
+
+  function updateHealth(now) {
+    const h = health();
+    if (h.ok || !h.reason) {
+      failSince = 0; failReported = false;
+      clearTimeout(failTimer); failTimer = null;
+    } else if (!failSince) {
+      failSince = now;
+      clearTimeout(failTimer);
+      failTimer = setTimeout(checkFailure, FAIL_AFTER_MS + 50);
+    }
+    return h;
+  }
+
+  function failingLongEnough(now) { return failSince > 0 && now - failSince >= FAIL_AFTER_MS; }
+
+  // 실패가 60초를 넘은 순간 즉시 알린다(이후는 30초 생존 신호에 실린다).
+  function checkFailure() {
+    failTimer = null;
+    const now = Date.now();
+    updateHealth(now);
+    if (failingLongEnough(now) && !failReported) heartbeat();
+  }
+
+  function heartbeat() {
+    if (!started || !isOwner()) return;
+    const now = Date.now();
+    const h = updateHealth(now);
+    if (!h.ok && (!h.reason || !failingLongEnough(now))) return;
+    const msg = { asset_id: currentAssetId() || '', ok: h.ok, reason: h.reason, path: location.pathname };
+    if (h.ok && settle.phase !== 'load') {
+      const badges = sel.channelBadges();
+      if (badges) msg.badges = badges;
+    }
+    if (!h.ok) failReported = true;
+    util.send('HEARTBEAT', msg);
+  }
+
+  // ---- 보고 ----
+  function sendBadges(badges, now) {
+    const id = currentAssetId();
+    if (!id || id !== targetAssetId()) return;
+    util.send('BADGE_STATE', {
+      asset_id: id,
+      badges: { instagram_direct: badges.instagram_direct, wec: badges.wec },
+      initial: initialPending,
+      userActionRecent: now - lastUserActionAt <= USER_ACTION_MS,
+      at: now
+    });
+    initialPending = false;
+    lastBadgeKey = badges.instagram_direct + ',' + badges.wec;
+  }
+
+  function sendCandidates(cands, now) {
+    if (!cands.length) return;
+    const id = currentAssetId();
+    if (!id || id !== targetAssetId()) return;
+    cands.forEach(function (c) {
+      util.send('LIST_CANDIDATE', { asset_id: id, channel: c.channel, sender: c.name, preview: c.preview, time: c.time, at: now });
+      console.debug('list candidate sent', c.channel);
+    });
+  }
+
+  function scheduleDebounce() {
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(function () { debounceTimer = null; debounceDue = true; observe(); }, L.LIST_DEBOUNCE_MS);
+  }
+
+  // 가려진 탭: 마지막 변화 뒤에는 관찰자가 다시 불리지 않으므로 두 번째 관찰을 한 번 예약한다.
+  function scheduleConfirm() {
+    if (confirmTimer) return;
+    confirmTimer = setTimeout(function () { confirmTimer = null; confirmDue = true; observe(); }, 0);
+  }
+
+  function evaluate(items, now) {
+    const r = L.findCandidates(items, known);
+    if (r.reset) {
+      console.debug('watcher list reset');
+      enterSettle('change', now);
+      stableKeys = keysOf(items);
+      return;
+    }
+    let toSend = r.candidates;
+    let hold = [];
+    if (!visible() && L.HIDDEN_TAB_DOUBLE_OBSERVE) {
+      const c = L.confirmTwice(prevCandKeys, r.candidates);
+      toSend = c.confirmed; hold = c.unconfirmed; prevCandKeys = c.next;
+      if (hold.length) scheduleConfirm();
+    } else {
+      prevCandKeys = null;
+    }
+    sendCandidates(toSend, now);
+    // 확정되지 않은 후보는 기억하지 않는다(다음 관찰에서 다시 후보가 되도록).
+    const holdKeys = new Set(keysOf(hold));
+    L.remember(known, keysOf(items).filter(function (k) { return !holdKeys.has(k); }), L.KNOWN_CAP);
+  }
+
+  // ---- 관찰 한 번 ----
+  function observe() {
+    if (!started) return;
+    const now = Date.now();
+    attach();
+    const h = updateHealth(now);
+
+    // 금지 사항 9: 로그인·보안 확인·캡차 화면에서는 모든 기능을 멈춘다(생존 신호의 실패 보고만 예외).
+    if (h.reason === 'login') {
+      if (!blocked) { blocked = true; clearListWork(); showNotice(null); console.debug('watcher blocked'); }
+      return;
+    }
+    if (blocked) { blocked = false; enterSettle('load', now); } // 로그인 복귀
+
+    if (!inInbox()) { showNotice(null); account = 'unknown'; clearListWork(); return; }
+
+    const acc = accountState();
+    showNotice(acc === 'other' || acc === 'unset' ? acc : null);
+    if (acc !== 'match') {
+      if (account === 'match') clearListWork();
+      account = acc;
+      return;
+    }
+    if (account !== 'match') { account = 'match'; enterSettle('load', now); } // 페이지 로드·대상 계정 화면 복귀
+
+    // 화면 조건 변경: 경로 + filterState()(검색어 포함)
+    const sk = location.pathname + '|' + sel.filterState();
+    if (screenKey !== null && sk !== screenKey) enterSettle('change', now);
+    screenKey = sk;
+
+    // 맨 위로 돌아온 순간은 화면 조건 변경으로 취급한다.
+    const scrolledDown = sel.listScrollTop() > 0;
+    if (!scrolledDown && wasScrolledDown) enterSettle('change', now);
+    wasScrolledDown = scrolledDown;
+
+    const badges = sel.channelBadges(); // 탭을 못 찾으면 null(0으로 보내지 않는다)
+    const items = scrolledDown ? [] : readTopItems();
+
+    // 조용한 시간이 지났으면 먼저 'ready'로 바꾸고, 그때까지 안정된 목록을 기억한다.
+    const t = L.settleTick(settle, now);
+    if (t.becameReady) {
+      settle = t.state;
+      L.remember(known, stableKeys, L.KNOWN_CAP);
+      stableKeys = [];
+      clearTimeout(settleTimer); settleTimer = null;
+      console.debug('watcher ready', t.from);
+    }
+
+    const sig = JSON.stringify([badges, keysOf(items)]);
+    const changed = sig !== lastSig;
+    lastSig = sig;
+    if (settle.phase !== 'ready') {
+      if (changed) { settle = L.settleTouch(settle, now); scheduleSettle(); }
+      stableKeys = keysOf(items);
+    } else if (changed) {
+      listDirty = true;
+    }
+
+    // 신호 1: 배지. 담당일 때만, 'load' 안정화 중에는 보내지 않는다.
+    if (badges && settle.phase !== 'load' && isOwner()) {
+      const bk = badges.instagram_direct + ',' + badges.wec;
+      if (bk !== lastBadgeKey || initialPending) sendBadges(badges, now);
+    }
+
+    // 신호 2: 목록. 담당 여부와 관계없이 수행한다.
+    if (scrolledDown) {
+      L.remember(known, readVisibleKeys(), L.KNOWN_CAP);
+      listDirty = false;
+      return;
+    }
+    if (settle.phase !== 'ready') return;
+    if (!listDirty && !confirmDue) return;
+    if (visible()) {
+      if (changed || !debounceTimer) { if (!debounceDue) scheduleDebounce(); }
+      if (!debounceDue) return;
+    }
+    debounceDue = false; confirmDue = false; listDirty = false;
+    evaluate(items, now);
+  }
+
+  // ---- 관찰자 연결 ----
+  // Meta가 탭 영역이나 목록 컨테이너를 새로 그리면 다시 붙인다.
+  function attach() {
+    const t = sel.channelTabArea();
+    const l = sel.listContainer();
+    if (t === observedTabs && l === observedList) return;
+    mo.disconnect();
+    observedTabs = t; observedList = l;
+    const opts = { childList: true, subtree: true, characterData: true };
+    if (t) mo.observe(t, opts);
+    if (l) mo.observe(l, opts);
+  }
+
+  function scheduleAttach() {
+    if (attachTimer) return;
+    attachTimer = setTimeout(function () { attachTimer = null; observe(); }, ATTACH_DELAY_MS);
+  }
+
+  // 스크롤·입력·클릭은 자주 일어나므로 모아서 한 번 관찰한다.
+  function scheduleObserve() {
+    if (scrollTimer) return;
+    scrollTimer = setTimeout(function () { scrollTimer = null; observe(); }, SCROLL_DELAY_MS);
+  }
+
+  function init() {
+    if (started) return;
+    started = true;
+    settle = L.settleStart(Date.now());
+    mo = new MutationObserver(function () { observe(); });
+    new MutationObserver(function () {
+      if (!observedTabs || !observedList || !observedTabs.isConnected || !observedList.isConnected) scheduleAttach();
+    }).observe(document.documentElement, { childList: true, subtree: true });
+
+    document.addEventListener('click', function (e) {
+      if (sel.isListOrThreadMenu(e.target)) lastUserActionAt = Date.now();
+      scheduleObserve(); // 필터 클릭 등 화면 조건 변경 확인
+    }, true);
+    document.addEventListener('scroll', scheduleObserve, { capture: true, passive: true });
+    document.addEventListener('input', scheduleObserve, true); // 검색어 변경 확인
+    document.addEventListener('visibilitychange', function () { prevCandKeys = null; observe(); });
+
+    util.onInboxChange(function () { observe(); });
+    util.onMessage('SETTINGS_CHANGED', function () { observe(); });
+    util.onMessage('WATCHER_ROLE', function () {
+      lastBadgeKey = null; // 담당이 되면 현재 값을 바로 보낸다
+      observe();
+      heartbeat();
+    });
+
+    setInterval(observe, POLL_MS);
+    setInterval(heartbeat, L.HEARTBEAT_MS);
+    observe();
+  }
+
+  if (typeof document !== 'undefined' && sel && util) {
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init, { once: true });
+    else init();
+  }
+})(self.MBX = self.MBX || {});
