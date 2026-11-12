@@ -9,7 +9,12 @@
   const ICON_ALT_CHANNEL = { WhatsApp: 'wec', Instagram: 'instagram_direct' }; // U1 미확인: Instagram alt 값은 예상
   // 금지 사항 9. 미확인: 실제 로그인·보안 확인·캡차 화면의 주소와 요소. 보수적으로 주소 접두와 비밀번호 입력란, 캡차 iframe 만 본다.
   const BLOCKED_PATH_RE = /^\/(?:login(?:[/.?]|$)|checkpoint(?:\/|$)|two_step_verification(?:\/|$)|two_factor(?:\/|$))/;
-  const BLOCKED_SELECTORS = ['input[type="password"]', 'iframe[src*="captcha" i]', 'iframe[title*="captcha" i]'];
+  // 화면에 보이는 비밀번호 입력란, 또는 화면에 보이는 캡차 "문제" iframe 만 본다.
+  // 보이지 않는 reCAPTCHA(배지·anchor)는 무시한다: src 의 bframe(문제 창)이나 title 의 challenge 로만 판별한다.
+  const PASSWORD_SELECTOR = 'input[type="password"]';
+  const CAPTCHA_FRAME_SELECTOR = 'iframe[src], iframe[title]';
+  const CAPTCHA_SRC_RE = /\/recaptcha\/(?:api2|enterprise)\/bframe|hcaptcha\.com\/.*challenge|arkoselabs|funcaptcha/i;
+  const CAPTCHA_TITLE_RE = /captcha.*challenge|challenge.*captcha|보안 문자/i;
 
   const BASE = 'https://business.facebook.com';
 
@@ -117,12 +122,35 @@
 
   // U11 미확인: 필터 컨트롤(Unread, Ad replies, Follow up, Filters)이 aria-pressed/selected/checked 로 켜짐을 나타낸다고 가정.
   // 목록 컨테이너 가까운 조상(최대 3단계) 안에서 켜진 컨트롤의 라벨과 검색어를 합친다. 아무것도 없으면 ''.
+  // 목록 컨테이너의 가까운 조상(최대 3단계). 필터·검색 영역이 여기 있다고 가정한다(U11 미확인).
+  function listScope(c) {
+    let scope = c;
+    for (let i = 0; scope && scope.parentElement && i < 3; i++) scope = scope.parentElement;
+    return scope;
+  }
+
+  // 목록 위쪽 필터·검색 영역의 조작인지(기획서 6-1: 필터 상태를 판별할 수 없으면 이 영역 클릭을 화면 조건 변경으로 본다).
+  // filterState 와 같은 범위 안이고, 목록 컨테이너·채널 탭·대화 영역·입력창 안은 아니다.
+  function isListHeaderControl(target) {
+    let el = target && target.nodeType === 3 ? target.parentElement : target;
+    if (!el || !el.closest || typeof document === 'undefined') return false;
+    const c = listContainer();
+    const scope = listScope(c);
+    if (!c || !scope || scope === c || !scope.contains(el)) return false;
+    if (c.contains(el)) return false;
+    if (el.closest('[role="tablist"]')) return false;
+    const region = messageRegion();
+    if (region && region.contains(el)) return false;
+    const comp = composer();
+    if (comp && comp.contains(el)) return false;
+    return true;
+  }
+
   function filterState() {
     if (typeof document === 'undefined') return '';
     const parts = [];
     const c = listContainer();
-    let scope = c;
-    for (let i = 0; scope && scope.parentElement && i < 3; i++) scope = scope.parentElement;
+    const scope = listScope(c);
     if (scope) {
       const on = scope.querySelectorAll('[aria-pressed="true"],[aria-selected="true"],[aria-checked="true"]');
       on.forEach(function (el) {
@@ -277,12 +305,29 @@
   }
 
   // 로그인·보안 확인·캡차 화면이면 'login', 아니면 null.
+  function isVisible(el) {
+    return !!el && typeof el.getClientRects === 'function' && el.getClientRects().length > 0;
+  }
+
+  function isCaptchaFrame(src, title) {
+    return (typeof src === 'string' && CAPTCHA_SRC_RE.test(src)) || (typeof title === 'string' && CAPTCHA_TITLE_RE.test(title));
+  }
+
+  // 요소 목록만 받아 판단한다(node 테스트용). 보이는 비밀번호 입력란 또는 보이는 캡차 문제 iframe.
+  function blockedByElements(passwordEls, frameEls) {
+    const pw = Array.from(passwordEls || []);
+    for (let i = 0; i < pw.length; i++) if (isVisible(pw[i])) return true;
+    const fr = Array.from(frameEls || []);
+    for (let i = 0; i < fr.length; i++) {
+      if (isVisible(fr[i]) && isCaptchaFrame(fr[i].getAttribute('src'), fr[i].getAttribute('title'))) return true;
+    }
+    return false;
+  }
+
   function blockedScreen() {
     if (typeof document === 'undefined' || typeof location === 'undefined') return null;
     if (isBlockedPath(location.pathname)) return 'login';
-    for (let i = 0; i < BLOCKED_SELECTORS.length; i++) {
-      if (document.querySelector(BLOCKED_SELECTORS[i])) return 'login';
-    }
+    if (blockedByElements(document.querySelectorAll(PASSWORD_SELECTOR), document.querySelectorAll(CAPTCHA_FRAME_SELECTOR))) return 'login';
     return null;
   }
 
@@ -290,6 +335,7 @@
     assetIdFrom, threadIdFrom, channelFromPath, parseBadgeText, labelMatches,
     channelTabs, badgeOf, listContainer, listItems, listScrollTop, filterState, joinFilterState, isListOrThreadMenu, messageRegion,
     bubbleFrom, bubbleTextEl, composer, submitButton, isSubmitButton, searchValue, dialogOpen,
-    channelOfIconAlt, channelOfHref, channelTabArea, channelBadges, itemLines, itemChannel, isBlockedPath, blockedScreen
+    channelOfIconAlt, channelOfHref, channelTabArea, channelBadges, itemLines, itemChannel, isBlockedPath, blockedScreen,
+    isCaptchaFrame, blockedByElements, isListHeaderControl
   };
 })(typeof module !== 'undefined' && module.exports ? module.exports : (self.MBX = self.MBX || {}));

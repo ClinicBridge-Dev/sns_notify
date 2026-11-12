@@ -67,3 +67,16 @@ test('isValidThreadLang accepts OFF and listed codes only', () => {
   assert.equal(C.isValidThreadLang(''), false);
   assert.equal(C.isValidThreadLang(undefined), false);
 });
+
+test('assetMatches requires a configured, trimmed assetId equal to the report asset_id', () => {
+  const { assetMatches } = require('../lib/settings.js');
+  assert.equal(assetMatches({ assetId: '' }, { asset_id: '' }), false);
+  assert.equal(assetMatches({ assetId: '   ' }, { asset_id: '' }), false);
+  assert.equal(assetMatches({ assetId: '   ' }, { asset_id: '   ' }), false);
+  assert.equal(assetMatches({}, { asset_id: '1' }), false);
+  assert.equal(assetMatches({ assetId: '1' }, { asset_id: '2' }), false);
+  assert.equal(assetMatches({ assetId: '1' }, { asset_id: 1 }), false);
+  assert.equal(assetMatches({ assetId: '1' }, {}), false);
+  assert.equal(assetMatches({ assetId: ' 1 ' }, { asset_id: '1' }), true);
+  assert.equal(assetMatches({ assetId: '1' }, { asset_id: '1' }), true);
+});

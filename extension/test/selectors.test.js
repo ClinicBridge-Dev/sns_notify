@@ -91,3 +91,22 @@ test('new DOM helpers are safe without a document', () => {
   assert.equal(sel.itemChannel(null), null);
   assert.equal(sel.blockedScreen(), null);
 });
+
+const fakeEl = (visible, attrs = {}) => ({ getClientRects: () => (visible ? [1] : []), getAttribute: (k) => (k in attrs ? attrs[k] : null) });
+
+test('blockedByElements needs a visible password input or a visible captcha challenge frame', () => {
+  assert.equal(sel.blockedByElements([fakeEl(false)], []), false);
+  assert.equal(sel.blockedByElements([fakeEl(true)], []), true);
+  // 보이지 않는 reCAPTCHA, 보이는 reCAPTCHA 배지(anchor)는 무시
+  assert.equal(sel.blockedByElements([], [fakeEl(false, { src: 'https://www.google.com/recaptcha/api2/bframe?k=1' })]), false);
+  assert.equal(sel.blockedByElements([], [fakeEl(true, { src: 'https://www.google.com/recaptcha/api2/anchor?k=1', title: 'reCAPTCHA' })]), false);
+  assert.equal(sel.blockedByElements([], [fakeEl(true, { src: 'https://x.com/captcha/widget' })]), false);
+  assert.equal(sel.blockedByElements([], [fakeEl(true, { src: 'https://www.google.com/recaptcha/api2/bframe?k=1' })]), true);
+  assert.equal(sel.blockedByElements([], [fakeEl(true, { title: 'recaptcha challenge expires in two minutes' })]), true);
+  assert.equal(sel.blockedByElements(null, null), false);
+});
+
+test('isListHeaderControl is safe without a document', () => {
+  assert.equal(sel.isListHeaderControl(null), false);
+  assert.equal(sel.isListHeaderControl({ closest: () => null }), false);
+});

@@ -61,6 +61,13 @@
     return configured === assetId ? 'standby' : 'other_account';
   }
 
+  // service worker 의 BADGE_STATE·LIST_CANDIDATE 계정 검사. 설정 assetId가 비어 있지 않고 보고의 asset_id와 같을 때만 참.
+  function assetMatches(settings, msg) {
+    const target = settings && typeof settings.assetId === 'string' ? settings.assetId.trim() : '';
+    return !!target && !!msg && typeof msg.asset_id === 'string' && msg.asset_id === target;
+  }
+
+  root.assetMatches = assetMatches;
   root.roleFor = roleFor;
   root.validateWebhookUrl = validateWebhookUrl;
   root.DEFAULT_SETTINGS = DEFAULT_SETTINGS;

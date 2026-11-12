@@ -18,6 +18,10 @@
   const NOTICE_UNSET = '설정에서 알림 대상 계정을 지정하세요';
   const NOTICE_SELECTOR = '수신함 화면 요소를 찾지 못해 Slack 알림 감지가 멈췄습니다';
   const NOTICE_NO_ASSET = '계정 정보(asset_id)를 읽지 못해 Slack 알림 감지가 멈췄습니다';
+  const NOTICE_BLOCKED = '로그인/보안 확인 화면에서 감지를 멈췄습니다';
+  const BLOCK_GRACE_MS = 3000;    // 로그인·보안 확인 표시가 이만큼 이어져야 차단으로 본다(잠깐의 오인 방지)
+  const CONFIRM_DELAY_MS = 400;   // 가려진 탭의 두 번째 관찰(HOLD_MS 안)
+  const LIST_PATHS = ['wec', 'instagram_direct', 'all']; // 신호 2를 수행하는 경로(댓글 등 제외)
 
   let started = false;
   let settle = null;              // { phase: 'load'|'change'|'ready', lastChange }
@@ -38,6 +42,7 @@
   let debounceTimer = null, confirmTimer = null, settleTimer = null, failTimer = null;
   let attachTimer = null, scrollTimer = null; // scrollTimer: scheduleObserve 의 모음 타이머
   let failSince = 0, failReported = false;
+  let blockSeenSince = 0, blockTimer = null;
   let observedTabs = null, observedList = null;
   let mo = null;
   let notice = null;
@@ -93,7 +98,7 @@
     return { box: box, text: text, btn: btn };
   }
 
-  const NOTICE_TEXT = { other: NOTICE_OTHER, unset: NOTICE_UNSET, selector: NOTICE_SELECTOR, no_asset_id: NOTICE_NO_ASSET };
+  const NOTICE_TEXT = { other: NOTICE_OTHER, unset: NOTICE_UNSET, selector: NOTICE_SELECTOR, no_asset_id: NOTICE_NO_ASSET, blocked: NOTICE_BLOCKED };
 
   // Meta의 대화상자가 열려 있으면 숨긴다(기획서 12장).
   function showNotice(kind) {
@@ -134,9 +139,10 @@
   function toItem(el, pathCh) {
     const p = L.parseItemLines(sel.itemLines(el));
     if (!p) return null;
-    let ch = sel.itemChannel(el);
-    if (!ch && (pathCh === 'wec' || pathCh === 'instagram_direct')) ch = pathCh;
-    if (!ch) return null; // /inbox/all 등에서 채널을 알 수 없는 항목은 건너뛴다
+    // 채널은 아이콘으로만 정한다. 채널 경로에서는 경로의 채널과 같아야 한다(다른 채널·댓글 항목 제외).
+    const ch = sel.itemChannel(el);
+    if (!ch) return null;
+    if (pathCh !== 'all' && ch !== pathCh) return null;
     const it = { channel: ch, name: p.name, preview: p.preview, time: p.time };
     it.key = L.itemKey(it);
     return it;
@@ -167,11 +173,13 @@
     return keys;
   }
 
+  function listPath() { return LIST_PATHS.indexOf(sel.channelFromPath(location.pathname)) >= 0; }
+
   function keysOf(items) { return items.map(function (i) { return i.key; }); }
 
   // ---- 상태 점검(생존 신호) ----
   function health() {
-    if (sel.blockedScreen()) return { ok: false, reason: 'login' };
+    if (blocked || sel.blockedScreen()) return { ok: false, reason: 'login' };
     if (!inInbox()) return { ok: false, reason: null };
     const acc = accountState();
     if (acc === 'none') return { ok: false, reason: 'no_asset_id' };
@@ -180,12 +188,14 @@
     return { ok: true, reason: null };
   }
 
+  // 실패 시간은 마지막으로 완전히 정상이었던 관찰부터 센다. 실패 사유가 잠깐 바뀌어도(깜빡임) 다시 세지 않는다.
+  // 보고 대상이 아닌 상태(미설정·다른 계정·수신함 밖)는 실패가 아니므로 시계를 멈추지도 시작하지도 않는다.
   function updateHealth(now) {
     const h = health();
-    if (h.ok || !h.reason) {
+    if (h.ok) {
       failSince = 0; failReported = false;
       clearTimeout(failTimer); failTimer = null;
-    } else if (!failSince) {
+    } else if (h.reason && !failSince) {
       failSince = now;
       clearTimeout(failTimer);
       failTimer = setTimeout(checkFailure, FAIL_AFTER_MS + 50);
@@ -253,7 +263,7 @@
   // 가려진 탭: 마지막 변화 뒤에는 관찰자가 다시 불리지 않으므로 두 번째 관찰을 한 번 예약한다.
   function scheduleConfirm() {
     if (confirmTimer) return;
-    confirmTimer = setTimeout(function () { confirmTimer = null; confirmDue = true; observe(); }, 0);
+    confirmTimer = setTimeout(function () { confirmTimer = null; confirmDue = true; observe(); }, CONFIRM_DELAY_MS);
   }
 
   function evaluate(items, now) {
@@ -289,14 +299,26 @@
     if (!started) return;
     const now = Date.now();
     attach();
-    const h = updateHealth(now);
 
-    // 금지 사항 9: 로그인·보안 확인·캡차 화면에서는 모든 기능을 멈춘다(생존 신호의 실패 보고만 예외).
-    if (h.reason === 'login') {
-      if (!blocked) { blocked = true; clearListWork(); showNotice(null); console.debug('watcher blocked'); }
-      return;
+    // 금지 사항 9: 로그인·보안 확인·캡차 화면에서는 모든 기능을 멈춘다(안내 표시와 생존 신호의 실패 보고만 예외).
+    // 표시가 BLOCK_GRACE_MS 넘게 이어져야 차단으로 본다. 그 전에도 판단과 보고는 쉬어 간다.
+    const raw = !!sel.blockedScreen();
+    if (raw) {
+      if (!blockSeenSince) {
+        blockSeenSince = now;
+        clearTimeout(blockTimer);
+        blockTimer = setTimeout(function () { blockTimer = null; observe(); }, BLOCK_GRACE_MS + 50);
+      }
+      if (!blocked && now - blockSeenSince >= BLOCK_GRACE_MS) { blocked = true; clearListWork(); console.debug('watcher blocked'); }
+    } else {
+      blockSeenSince = 0;
+      clearTimeout(blockTimer); blockTimer = null;
     }
-    if (blocked) { blocked = false; enterSettle('load', now); } // 로그인 복귀
+    if (blocked && !raw) { blocked = false; enterSettle('load', now); } // 로그인 복귀
+    updateHealth(now);
+    if (blocked) { showNotice('blocked'); return; }
+    if (raw) return; // 유예 중: 쉬어 간다(안내·load 재진입 없음)
+    const h = health();
 
     if (!inInbox()) { showNotice(null); account = 'unknown'; clearListWork(); return; }
 
@@ -322,7 +344,8 @@
     wasScrolledDown = scrolledDown;
 
     const badges = sel.channelBadges(); // 탭을 못 찾으면 null(0으로 보내지 않는다)
-    const items = scrolledDown ? [] : readTopItems();
+    const onListPath = listPath();
+    const items = (scrolledDown || !onListPath) ? [] : readTopItems();
 
     // 조용한 시간이 지났으면 먼저 'ready'로 바꾸고, 그때까지 안정된 목록을 기억한다.
     const t = L.settleTick(settle, now);
@@ -350,7 +373,8 @@
       if (bk !== lastBadgeKey || initialPending) sendBadges(badges, now);
     }
 
-    // 신호 2: 목록. 담당 여부와 관계없이 수행한다.
+    // 신호 2: 목록. 담당 여부와 관계없이 수행한다. 메시지 채널 경로(wec, instagram_direct, all)에서만.
+    if (!onListPath) { clearListWork(); return; }
     if (scrolledDown) {
       L.remember(known, readVisibleKeys(), L.KNOWN_CAP);
       listDirty = false;
@@ -392,6 +416,14 @@
     scrollTimer = setTimeout(function () { scrollTimer = null; observe(); }, SCROLL_DELAY_MS);
   }
 
+  // 기획서 6-1: 필터 상태를 판별할 수 없을 수 있으므로(U11) 목록 위쪽 필터·검색 영역 조작도 화면 조건 변경으로 본다.
+  function headerTouched(target) {
+    try {
+      if (!started || blocked || account !== 'match' || !sel.isListHeaderControl(target)) return;
+      enterSettle('change', Date.now());
+    } catch (e) { console.debug('watcher header check error'); }
+  }
+
   function init() {
     if (started) return;
     started = true;
@@ -403,10 +435,11 @@
 
     document.addEventListener('click', function (e) {
       if (sel.isListOrThreadMenu(e.target)) lastUserActionAt = Date.now();
+      headerTouched(e.target);
       scheduleObserve(); // 필터 클릭 등 화면 조건 변경 확인
     }, true);
     document.addEventListener('scroll', scheduleObserve, { capture: true, passive: true });
-    document.addEventListener('input', scheduleObserve, true); // 검색어 변경 확인
+    document.addEventListener('input', function (e) { headerTouched(e.target); scheduleObserve(); }, true); // 검색어 변경 확인
     document.addEventListener('visibilitychange', function () { prevCandKeys = null; observe(); });
 
     util.onInboxChange(function () { observe(); });
