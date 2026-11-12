@@ -1,5 +1,6 @@
 // R2~R4: 말풍선 도구 모음(번역, 복사). 도구 모음 1개를 Shadow DOM 안에 두고 재사용한다.
-// mouseover에서는 말풍선의 위치와 본문 요소의 존재만 본다. 본문 텍스트는 버튼을 눌렀을 때만 읽는다.
+// mouseover에서는 말풍선의 위치와 본문 요소의 구조(내용 있는 텍스트 노드의 존재)만 본다. 본문 텍스트는 버튼을 눌렀을 때만 읽는다.
+// 로그인·보안 확인·캡차 화면에서는 아무것도 하지 않는다(금지 사항 9).
 // fetch와 chrome.storage는 쓰지 않는다. 로그는 console.debug만, 본문은 넣지 않는다.
 (function (root) {
   const sel = root.sel;
@@ -120,13 +121,20 @@
     if (ui) ui.cpBtn.textContent = '복사';
   }
 
+  // 금지 사항 9: 로그인·보안 확인·캡차 화면에서는 말풍선 기능을 모두 멈춘다.
+  function blockedNow() {
+    return typeof sel.blockedScreen === 'function' && !!sel.blockedScreen();
+  }
+
   function onOver(e) {
     try {
       if (!ui || !enabled() || sel.dialogOpen()) return;
+      if (blockedNow()) { if (curBubble) hideBar(); if (result) hideResult(); return; }
       const path = e.composedPath ? e.composedPath() : [];
       if (path.indexOf(ui.bar) >= 0) { cancelHide(); return; }
       const b = sel.bubbleFrom(e.target);
-      if (!b || !sel.bubbleTextEl(b)) { if (curBubble) scheduleHide(); return; }
+      // 구조만 본다: 본문은 [복사]/[번역]을 눌렀을 때만 읽는다(기획서 7-1, 금지 사항 5).
+      if (!b || !sel.bubbleHasText(b)) { if (curBubble) scheduleHide(); return; }
       cancelHide();
       if (b !== curBubble) showBarFor(b);
     } catch (err) { console.debug('bubbles over failed'); }
@@ -148,7 +156,7 @@
     const box = ui.box;
     if (!result || !enabled()) { box.style.display = 'none'; return; }
     const b = findBubble(result.id);
-    if (!b || sel.dialogOpen()) { box.style.display = 'none'; return; }
+    if (!b || sel.dialogOpen() || blockedNow()) { box.style.display = 'none'; return; }
     const r = b.getBoundingClientRect();
     if (r.bottom < 0 || r.top > window.innerHeight) { box.style.display = 'none'; return; }
     box.style.display = 'block';
@@ -190,6 +198,7 @@
   // ---- 버튼 ----
   async function onTranslate() {
     try {
+      if (blockedNow()) { hideBar(); hideResult(); return; }
       const b = curBubble;
       const id = idOf(b);
       if (!id || pending.has(id)) return;
@@ -204,6 +213,7 @@
       let res;
       try { res = await util.send('TRANSLATE', { text: text, targetLang: tl, purpose: 'bubble' }); }
       finally { pending.delete(id); syncTrButton(); }
+      if (blockedNow()) return; // 기다리는 사이 로그인·보안 확인 화면이 떴다: 결과를 띄우지 않는다
       if (res && res.ok && typeof res.text === 'string') {
         const entry = { text: res.text, detectedLang: res.detectedLang, targetLang: tl };
         cache.set(id, entry);
@@ -216,6 +226,7 @@
   }
 
   async function onCopy() {
+    if (blockedNow()) { hideBar(); hideResult(); return; }
     const btn = ui.cpBtn;
     let ok = false;
     try {
@@ -253,7 +264,14 @@
     util.onInboxChange(function () { hideBar(); hideResult(); });
   }
 
-  root.bubbles = { _cache: cache };
+  root.bubbles = {
+    _cache: cache,
+    // 테스트용(test/bubbles.test.js)
+    _test: {
+      onTranslate: onTranslate, onCopy: onCopy, hide: hideBar,
+      ui: function () { return ui; }, setCurBubble: function (b) { curBubble = b; }
+    }
+  };
 
   if (typeof document !== 'undefined' && root.sel && root.util) {
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init, { once: true });

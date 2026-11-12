@@ -27,7 +27,8 @@ global.MBX.sel = {
   isSubmitButton: (t) => t === btn,
   threadIdFrom: () => env.thread,
   channelFromPath: (p) => (p.indexOf('/latest/inbox') === 0 ? 'all' : null),
-  dialogOpen: () => false
+  dialogOpen: () => false,
+  blockedScreen: () => (env.blocked ? 'login' : null)
 };
 global.MBX.util = {
   send(type, payload) {
@@ -69,7 +70,7 @@ const G = C._gate;
 
 function reset(o) {
   env = Object.assign({
-    text: '안녕하세요', thread: '1', path: '/latest/inbox/all', connected: true, port: true, onFocus: null,
+    text: '안녕하세요', thread: '1', path: '/latest/inbox/all', connected: true, port: true, onFocus: null, blocked: false,
     settings: { sendTranslateEnabled: true }, hasComposer: true, hasButton: true, emptyOnClick: true, enterSends: true,
     clicks: 0, sends: [], toasts: [], syntheticKeys: [],
     onPaste(t) { env.text = t; }, // Lexical이 붙여넣기를 전체 교체로 반영
@@ -444,4 +445,82 @@ test('fix round 2: paste reflected in thread B after the thread change but befor
   const later = enter();
   G.onKeyEvent(later);            // 넣기가 끝난 뒤에도 계속 막힌다
   assert.equal(later.prevented, true);
+});
+
+// ---- 최종 검토 3번: 포커스된 전송 버튼의 키보드 실행(Enter/Space)도 같은 판단을 거친다 ----
+const keyOn = (type, key, target, o) => new Ev(type, Object.assign({ key, code: key === ' ' ? 'Space' : 'Enter', target }, o));
+
+test('item 3: Enter / Space keydown on the focused Submit button with Korean is blocked and runs the translate flow', async () => {
+  for (const key of ['Enter', ' ']) {
+    reset();
+    const e = keyOn('keydown', key, btn);
+    G.onKeyEvent(e);
+    assert.equal(e.prevented, true, key); assert.equal(e.stopped, true, key);
+    await idle();
+    assert.equal(translates().length, 1, key);
+    assert.equal(env.clicks, 1, key); // 번역 후 확장이 이어서 누른 1회
+    assert.equal(env.text, '');
+  }
+});
+
+test('item 3: keypress/keyup on the Submit button are blocked without a second flow; modifiers do not bypass', async () => {
+  reset();
+  const d = deferred();
+  env.translate = () => d.p;
+  G.onKeyEvent(keyOn('keydown', 'Enter', btn, { shiftKey: true }));
+  for (const t of ['keypress', 'keyup']) {
+    const e = keyOn(t, 'Enter', btn);
+    G.onKeyEvent(e);
+    assert.equal(e.prevented, true, t);
+  }
+  d.resolve({ ok: true, text: 'Hello' });
+  await idle();
+  assert.equal(translates().length, 1);
+});
+
+test('item 3: non-Korean Enter/Space on the Submit button passes to Meta; other keys and other buttons are ignored', () => {
+  reset({ text: 'hello' });
+  const e = keyOn('keydown', ' ', btn);
+  G.onKeyEvent(e);
+  assert.equal(e.prevented, false); assert.equal(e.stopped, false);
+  reset();
+  const a = new Ev('keydown', { key: 'a', code: 'KeyA', target: btn });
+  G.onKeyEvent(a);
+  assert.equal(a.prevented, false);
+  const o = keyOn('keydown', 'Enter', other);
+  G.onKeyEvent(o);
+  assert.equal(o.prevented, false);
+  assert.equal(translates().length, 0);
+});
+
+// ---- 최종 검토 5번: 금지 사항 9 — 로그인·보안 확인·캡차 화면에서는 번역 전송을 멈춘다(한글은 넘기지 않는다) ----
+test('item 5: on a blocked screen Korean Enter / button is blocked with no translation; non-Korean passes', async () => {
+  reset({ blocked: true });
+  const e = enter();
+  G.onKeyEvent(e);
+  assert.equal(e.prevented, true); assert.equal(e.stopped, true);
+  const c = new Ev('click', { target: btn });
+  G.onPointerEvent(c);
+  assert.equal(c.prevented, true);
+  await idle();
+  assert.equal(translates().length, 0);
+  assert.equal(env.clicks, 0);
+  assert.equal(env.text, '안녕하세요');
+  assert.ok(env.toasts.some((t) => /로그인/.test(t)), env.toasts.join('|'));
+  reset({ blocked: true, text: 'hello' });
+  const e2 = enter();
+  G.onKeyEvent(e2);
+  assert.equal(e2.prevented, false);
+});
+
+test('item 5: a blocked screen appearing during translation stops the flow before insert and send', async () => {
+  reset();
+  const d = deferred();
+  env.translate = () => d.p;
+  G.onKeyEvent(enter());
+  env.blocked = true;
+  d.resolve({ ok: true, text: 'Hello' });
+  await idle();
+  assert.equal(env.clicks, 0);
+  assert.equal(env.text, '안녕하세요');
 });

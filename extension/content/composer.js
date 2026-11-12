@@ -195,6 +195,7 @@
   const MSG_WRONG_THREAD = '번역 중 대화가 바뀌어 번역문이 지금 입력창에 들어갔을 수 있습니다. 전송하지 않았습니다. 입력창을 확인하고 지운 뒤 다시 입력하세요';
   const MSG_NO_THREAD = '대화를 확인할 수 없어 번역 전송을 막았습니다. 대화를 다시 열어 주세요';
   const MSG_NO_COMPOSER = '입력창을 찾지 못해 번역 전송이 동작하지 않습니다. 화면 구조가 바뀌었을 수 있습니다';
+  const MSG_BLOCKED_SCREEN = '로그인/보안 확인 화면이 떠 있어 번역 전송을 멈췄습니다. 전송하지 않았습니다';
   const SENT_SHOW_MS = 5000;
   const NO_COMPOSER_NOTICE_MS = 5000;
 
@@ -261,10 +262,19 @@
     };
   }
 
+  // 금지 사항 9: 로그인·보안 확인·캡차 화면이면 참.
+  function blockedNow() {
+    return typeof sel.blockedScreen === 'function' && !!sel.blockedScreen();
+  }
+
   // decideSend 앞에 "대화 전환 중 들어간 번역문" 격리를 더한다. 격리된 내용은 어느 대화에서도 Meta에 넘기지 않는다.
+  // 금지 사항 9: 로그인·보안 확인 화면에서는 번역 흐름을 시작하지 않는다. 그때 Meta에 넘기지 않을 입력(한글 등)은
+  // 그대로 막는다('block_screen'). 사용자가 고른 통과(한글 없음, 번역 끔, 이 대화 끔)는 그대로 둔다.
   function decide(ctx) {
     if (!ctx.bypass && !ctx.busy && quarantined()) return 'quarantine';
-    return root.decideSend(ctx);
+    const d = root.decideSend(ctx);
+    if (d !== 'pass' && blockedNow()) return 'block_screen';
+    return d;
   }
 
   function block(e, prevent) {
@@ -294,6 +304,7 @@
       return;
     }
     if (d === 'block_disconnected') util.toast(MSG_RELOAD);
+    if (d === 'block_screen') util.toast(MSG_BLOCKED_SCREEN);
     if (d === 'quarantine') util.toast(MSG_WRONG_THREAD);
     // 'swallow': 번역 처리 중에 다시 누른 것. 아무것도 하지 않는다.
   }
@@ -315,9 +326,19 @@
     return true;
   }
 
+  // 포커스된 전송 버튼의 키보드 실행(Enter, Space). 버튼 클릭과 같은 판단을 거친다(최종 검토 3번).
+  // 수정 키는 보지 않는다(Shift+Enter 로도 버튼이 실행될 수 있다). 흐름과 안내는 keydown 에서만 시작한다.
+  function onSubmitKey(e) {
+    const d = decide(buildCtx());
+    if (d === 'pass') return;
+    block(e, true);
+    if (e.type === 'keydown') act(d);
+  }
+
   function onKeyEvent(e) {
     try {
       if (!guardActive()) return;
+      if (root.isActivationKey(e) && sel.isSubmitButton(e.target)) { onSubmitKey(e); return; }
       if (!root.isEnterKey(e) || root.hasModifier(e)) return;
       if (!inComposer(e.target)) return;
       const ctx = buildCtx();
@@ -430,6 +451,7 @@
       if (!res || res.ok !== true || typeof res.text !== 'string' || normalize(res.text) === '') { util.toast(failText(res)); return; }
       const translated = res.text;
       const want = normalize(translated);
+      if (blockedNow()) { util.toast(MSG_BLOCKED_SCREEN); return; } // 금지 사항 9: 번역 중에 로그인·보안 확인 화면이 떴다
       const stale = function () { return my !== flowSeq || currentThread() !== tid; };
       // 넣는 동안 대화가 바뀌면 onThreadChanged가 이 번역문을 바로 격리한다(넣기가 끝나기 전의 틈을 막는다).
       inflightTranslation = want;
@@ -464,6 +486,7 @@
     if (currentThread() !== tid || sel.composer() !== c || normalize(text()) !== want || root.hasHangul(text())) {
       util.toast(MSG_EDITED); return;
     }
+    if (blockedNow()) { util.toast(MSG_BLOCKED_SCREEN); return; } // 금지 사항 9: 이어서 전송하지 않는다
     bypassText = want;
     bypassUntil = Date.now() + C('BYPASS_MS', 1000);
     try {
@@ -711,7 +734,8 @@
     const c = sel.composer();
     const r = c ? c.getBoundingClientRect() : null;
     const s = util.settings() || {};
-    const visible = !!(r && r.width > 0 && r.height > 0 && currentThread() && !sel.dialogOpen());
+    // 금지 사항 9: 로그인·보안 확인·캡차 화면에서는 막대를 숨긴다.
+    const visible = !!(r && r.width > 0 && r.height > 0 && currentThread() && !sel.dialogOpen() && !blockedNow());
     if (!visible) { ui.bar.style.display = 'none'; ui.outline.style.display = 'none'; ui.busy.style.display = 'none'; closePops(); return; }
     ui.bar.style.display = 'flex';
     ui.bar.style.left = Math.max(4, r.left) + 'px';

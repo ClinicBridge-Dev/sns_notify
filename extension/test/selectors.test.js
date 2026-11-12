@@ -110,3 +110,37 @@ test('isListHeaderControl is safe without a document', () => {
   assert.equal(sel.isListHeaderControl(null), false);
   assert.equal(sel.isListHeaderControl({ closest: () => null }), false);
 });
+
+// ---- 최종 검토 7번: mouseover 판단은 본문을 읽지 않는다(기획서 7-1, 금지 사항 5) ----
+function textNode(len) {
+  return {
+    nodeType: 3, length: len, childNodes: [],
+    get data() { throw new Error('read data'); }, get nodeValue() { throw new Error('read nodeValue'); },
+    get textContent() { throw new Error('read textContent'); }, get wholeText() { throw new Error('read wholeText'); }
+  };
+}
+function elem(children, attrs) {
+  return {
+    nodeType: 1, childNodes: children, attrs: attrs || {},
+    get innerText() { throw new Error('read innerText'); }, get textContent() { throw new Error('read textContent'); },
+    querySelectorAll(q) {
+      assert.equal(q, '[dir="auto"]');
+      const out = [];
+      const walk = (n) => (n.childNodes || []).forEach((c) => { if (c.attrs && c.attrs.dir === 'auto') out.push(c); walk(c); });
+      walk(this);
+      return out;
+    }
+  };
+}
+
+test('item 7: bubbleHasText is structural — true for a [dir=auto] holding a non-empty text node, without reading any text', () => {
+  const withText = elem([elem([elem([textNode(5)])], { dir: 'auto' })]);
+  assert.equal(sel.bubbleHasText(withText), true);
+  const emptyText = elem([elem([textNode(0)], { dir: 'auto' })]);
+  assert.equal(sel.bubbleHasText(emptyText), false);
+  const noDirAuto = elem([elem([textNode(3)])]); // 사진·음성: [dir=auto] 없음
+  assert.equal(sel.bubbleHasText(noDirAuto), false);
+  const emptyDirAuto = elem([elem([elem([])], { dir: 'auto' })]);
+  assert.equal(sel.bubbleHasText(emptyDirAuto), false);
+  assert.equal(sel.bubbleHasText(null), false);
+});

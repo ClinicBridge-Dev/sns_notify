@@ -195,7 +195,27 @@
     return b && region && region.contains(b) ? b : null;
   }
 
-  // 텍스트가 없는 말풍선(사진, 음성, 스티커)은 null.
+  // mouseover 용(기획서 7-1, 금지 사항 5): 말풍선 안에 내용이 있는 [dir="auto"]가 있는지 구조만 본다.
+  // 문자열을 꺼내지 않는다(innerText/textContent/data 를 읽지 않고, 텍스트 노드의 길이만 본다).
+  function hasNonEmptyTextNode(node, depth) {
+    const kids = node && node.childNodes;
+    if (!kids || depth > 20) return false;
+    for (let i = 0; i < kids.length; i++) {
+      const k = kids[i];
+      if (k.nodeType === 3) { if (k.length > 0) return true; }
+      else if (k.nodeType === 1 && hasNonEmptyTextNode(k, depth + 1)) return true;
+    }
+    return false;
+  }
+
+  function bubbleHasText(bubbleEl) {
+    if (!bubbleEl || typeof bubbleEl.querySelectorAll !== 'function') return false;
+    const els = bubbleEl.querySelectorAll('[dir="auto"]');
+    for (let i = 0; i < els.length; i++) if (hasNonEmptyTextNode(els[i], 0)) return true;
+    return false;
+  }
+
+  // 버튼을 눌렀을 때만 부른다(본문을 읽는다). 텍스트가 없는 말풍선(사진, 음성, 스티커)은 null.
   function bubbleTextEl(bubbleEl) {
     if (!bubbleEl) return null;
     const els = bubbleEl.querySelectorAll('[dir="auto"]');
@@ -334,7 +354,7 @@
   root.sel = {
     assetIdFrom, threadIdFrom, channelFromPath, parseBadgeText, labelMatches,
     channelTabs, badgeOf, listContainer, listItems, listScrollTop, filterState, joinFilterState, isListOrThreadMenu, messageRegion,
-    bubbleFrom, bubbleTextEl, composer, submitButton, isSubmitButton, searchValue, dialogOpen,
+    bubbleFrom, bubbleHasText, bubbleTextEl, composer, submitButton, isSubmitButton, searchValue, dialogOpen,
     channelOfIconAlt, channelOfHref, channelTabArea, channelBadges, itemLines, itemChannel, isBlockedPath, blockedScreen,
     isCaptchaFrame, blockedByElements, isListHeaderControl
   };

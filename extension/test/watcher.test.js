@@ -5,7 +5,8 @@ const EXT = require('path').join(__dirname, '..') + '/';
 const assert = require('assert');
 
 // 새 watcher.js 인스턴스와 흉내 낸 환경을 만든다. 각 테스트는 동기로 돌고 끝나면 전역을 되돌린다.
-function withEnv(fn) {
+function withEnv(fn, opts) {
+  opts = opts || {};
   const saved = { now: Date.now, st: global.setTimeout, ct: global.clearTimeout, si: global.setInterval, dbg: console.debug };
   console.debug = () => {};
   try {
@@ -19,9 +20,11 @@ function advance(ms) { const end = now + ms; for (;;) { timers.sort((a, b) => a.
 const mos = [];
 global.MutationObserver = class { constructor(cb) { this.cb = cb; mos.push(this); } observe() {} disconnect() {} };
 const listeners = {};
-global.document = { readyState: 'complete', visibilityState: 'visible', documentElement: {}, addEventListener: (t, f) => { (listeners[t] = listeners[t] || []).push(f); } };
+global.document = { readyState: 'complete', visibilityState: 'visible', referrer: opts.referrer || '', documentElement: {}, addEventListener: (t, f) => { (listeners[t] = listeners[t] || []).push(f); } };
 global.window = { innerHeight: 800 };
-global.location = { pathname: '/latest/inbox/wec', href: 'https://business.facebook.com/latest/inbox/wec?asset_id=A1' };
+global.location = opts.path
+  ? { pathname: opts.path, href: 'https://business.facebook.com' + opts.path }
+  : { pathname: '/latest/inbox/wec', href: 'https://business.facebook.com/latest/inbox/wec?asset_id=A1' };
 global.self = global;
 global.MBX = {};
 Object.assign(MBX, require(EXT + 'lib/constants.js'), require(EXT + 'lib/listcand.js'));
@@ -303,3 +306,45 @@ test('owner from the start still sends initial:true after the load settle', () =
   assert.equal(b.length, 1);
   assert.equal(b[0].initial, true);
 }));
+
+// ---- 최종 검토 8번: 로그인 경고는 수신함 탭(또는 수신함에서 넘어간 로그인·보안 확인 경로)에서만 보낸다 ----
+const loginHbs = (e) => e.sent.filter(s => s.type === 'HEARTBEAT' && s.reason === 'login');
+const go = (path) => { global.location.pathname = path; global.location.href = 'https://business.facebook.com' + path; };
+
+test('item 8: an unrelated Business page with a password field never reports a login failure', () => withEnv((e) => {
+  e.setSettings({ assetId: 'A1' });
+  e.setBlocked('login'); e.mut();
+  e.advance(61000); e.hb();
+  assert.equal(loginHbs(e).length, 0);
+  assert.equal(e.noticeText(), null, 'no "detection stopped" notice on an unrelated page');
+}, { path: '/settings/security' }));
+
+test('item 8: a /login page opened directly (not from the inbox) does not report', () => withEnv((e) => {
+  e.setSettings({ assetId: 'A1' });
+  e.setBlocked('login'); e.mut();
+  e.advance(61000); e.hb();
+  assert.equal(loginHbs(e).length, 0);
+}, { path: '/login/', referrer: 'https://business.facebook.com/settings/' }));
+
+test('item 8: a /checkpoint page reached from the inbox (full navigation, referrer) reports login', () => withEnv((e) => {
+  e.setSettings({ assetId: 'A1' });
+  e.setBlocked('login'); e.mut();
+  e.advance(61000);
+  assert.equal(loginHbs(e).length, 1);
+  assert.equal(loginHbs(e)[0].path, '/checkpoint/123/');
+}, { path: '/checkpoint/123/', referrer: 'https://business.facebook.com/latest/inbox/wec?asset_id=A1' }));
+
+test('item 8: the inbox tab moving in-app to /login reports; moving to another page with a password field does not', () => {
+  withEnv((e) => {
+    e.ready();
+    go('/login/'); e.setBlocked('login'); e.mut();
+    e.advance(61000);
+    assert.equal(loginHbs(e).length, 1);
+  });
+  withEnv((e) => {
+    e.ready();
+    go('/settings/security'); e.setBlocked('login'); e.mut();
+    e.advance(61000); e.hb();
+    assert.equal(loginHbs(e).length, 0);
+  });
+});

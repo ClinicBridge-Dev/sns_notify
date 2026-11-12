@@ -40,12 +40,28 @@
   let attachTimer = null, scrollTimer = null; // scrollTimer: scheduleObserve 의 모음 타이머
   let failSince = 0, failReported = false;
   let blockSeenSince = 0, blockTimer = null;
+  let seenInbox = false;          // 이 문서에서 수신함 경로를 본 적이 있는지(앱 안 이동으로 로그인 화면에 간 경우)
   let observedTabs = null, observedList = null;
   let mo = null;
   let notice = null;
 
   function isOwner() { return util.role() === 'owner'; }
   function inInbox() { return sel.channelFromPath(location.pathname) !== null; }
+
+  // 이전 문서가 수신함이었는지(로그인·보안 확인 화면으로 다시 로드된 경우). 같은 사이트의 referrer 경로만 본다.
+  function referredFromInbox() {
+    const r = typeof document.referrer === 'string' ? document.referrer : '';
+    if (r.indexOf('https://business.facebook.com/') !== 0) return false;
+    try { return sel.channelFromPath(new URL(r).pathname) !== null; } catch (e) { return false; }
+  }
+
+  // 로그인·보안 확인 화면을 감지 실패로 보고할지(최종 검토 8번). 수신함 화면이거나, 수신함에서 넘어간
+  // 로그인·보안 확인 경로일 때만. 관련 없는 Business 화면(비밀번호 입력란이 있는 설정 화면 등)은 보고하지 않는다.
+  // 금지 사항 9의 "모든 기능 멈춤"은 이와 관계없이 어느 화면에서나 지킨다.
+  function loginReportable() {
+    if (inInbox()) return true;
+    return sel.isBlockedPath(location.pathname) && (seenInbox || referredFromInbox());
+  }
   function visible() { return document.visibilityState === 'visible'; }
 
   function tabHrefs() {
@@ -176,7 +192,7 @@
 
   // ---- 상태 점검(생존 신호) ----
   function health() {
-    if (blocked || sel.blockedScreen()) return { ok: false, reason: 'login' };
+    if (blocked || sel.blockedScreen()) return { ok: false, reason: loginReportable() ? 'login' : null };
     if (!inInbox()) return { ok: false, reason: null };
     const acc = accountState();
     if (acc === 'none') return { ok: false, reason: 'no_asset_id' };
@@ -299,6 +315,7 @@
   function observeOnce() {
     if (!started) return;
     const now = Date.now();
+    if (inInbox()) seenInbox = true;
     attach();
 
     // 금지 사항 9: 로그인·보안 확인·캡차 화면에서는 모든 기능을 멈춘다(안내 표시와 생존 신호의 실패 보고만 예외).
@@ -317,7 +334,7 @@
     }
     if (blocked && !raw) { blocked = false; enterSettle('load', now); } // 로그인 복귀
     updateHealth(now);
-    if (blocked) { showNotice('blocked'); return; }
+    if (blocked) { showNotice(loginReportable() ? 'blocked' : null); return; }
     if (raw) return; // 유예 중: 쉬어 간다(안내·load 재진입 없음)
     const h = health();
 

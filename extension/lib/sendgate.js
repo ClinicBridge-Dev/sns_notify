@@ -27,6 +27,11 @@
     return !!e && (e.key === 'Enter' || e.code === 'Enter' || e.code === 'NumpadEnter');
   }
 
+  // 포커스된 버튼을 실행하는 키(Enter, Space). 전송 버튼의 키보드 실행 판단에 쓴다.
+  function isActivationKey(e) {
+    return isEnterKey(e) || (!!e && (e.key === ' ' || e.key === 'Spacebar' || e.code === 'Space'));
+  }
+
   function hasModifier(e) {
     return !!e && !!(e.shiftKey || e.ctrlKey || e.altKey || e.metaKey);
   }
@@ -49,6 +54,7 @@
   root.decideSend = decideSend;
   root.isEnterKey = isEnterKey;
   root.hasModifier = hasModifier;
+  root.isActivationKey = isActivationKey;
   root.isComposingEvent = isComposingEvent;
   root.normalizeForCompare = normalizeForCompare;
 })(typeof module !== 'undefined' && module.exports ? module.exports : (self.MBX = self.MBX || {}));
