@@ -416,3 +416,32 @@ test('thread view open but composer not found for 5s: one status notice per thre
     assert.equal(env.toasts.length, 1); // 같은 대화에서는 다시 알리지 않는다
   } finally { Date.now = realNow; }
 });
+
+test('fix round 2: paste reflected in thread B after the thread change but before insertText resolves — Enter in that window is stopped', async () => {
+  reset();
+  let windowEnter = null;
+  env.onPaste = (t) => {
+    env.thread = '2'; env.text = 'B 대화 초안';
+    G.onThreadChanged();          // tick이 대화 전환을 감지(busy 해제)
+    G.setLang('2', 'EN-US');
+    G.tickClear();                // 아직 반영 전: 격리를 풀면 안 된다
+    setTimeout(() => {
+      env.text = t;               // Lexical이 늦게 반영 → 번역문이 B의 입력창에
+      G.tickClear();
+      windowEnter = enter();
+      G.onKeyEvent(windowEnter);  // insertText가 끝나기 전에 사용자가 Enter
+    }, 20);
+  };
+  G.onKeyEvent(enter());
+  await new Promise((r) => setTimeout(r, 800));
+  await idle();
+  assert.ok(windowEnter, 'window Enter was pressed');
+  assert.equal(windowEnter.prevented, true);
+  assert.equal(windowEnter.stopped, true);
+  assert.equal(env.clicks, 0);
+  assert.equal(env.text, 'Hello');
+  assert.ok(env.toasts.includes(MSG_WRONG));
+  const later = enter();
+  G.onKeyEvent(later);            // 넣기가 끝난 뒤에도 계속 막힌다
+  assert.equal(later.prevented, true);
+});

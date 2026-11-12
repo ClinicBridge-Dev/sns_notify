@@ -210,6 +210,7 @@
   let localSettings = null;  // util.settings()가 아직 없을 때 GET_PUBLIC_SETTINGS로 받은 값
   let sentTimer = null;
   let quarantineText = null; // 대화 전환 중에 들어갔을 수 있는 번역문(정규화). 입력창이 이 내용이면 전송을 막는다
+  let inflightTranslation = null; // 지금 입력창에 넣고 있는 번역문(정규화). 넣기가 끝나면 null
   let noComposerSince = 0;   // 대화 화면인데 입력창을 못 찾은 시각
   let noComposerNotified = null; // 안내한 대화 번호(대화마다 1회)
 
@@ -430,7 +431,10 @@
       const translated = res.text;
       const want = normalize(translated);
       const stale = function () { return my !== flowSeq || currentThread() !== tid; };
-      const ok = await insertText(translated, { replaceAll: true, abort: stale });
+      // 넣는 동안 대화가 바뀌면 onThreadChanged가 이 번역문을 바로 격리한다(넣기가 끝나기 전의 틈을 막는다).
+      inflightTranslation = want;
+      let ok;
+      try { ok = await insertText(translated, { replaceAll: true, abort: stale }); } finally { inflightTranslation = null; }
       if (stale()) {
         // 넣는 도중 대화가 바뀌었다. Meta가 같은 입력창을 다시 쓰면 번역문이 다른 대화의 입력창에 있을 수 있다.
         // 그 내용은 격리해 다음 Enter·전송 버튼에서도 Meta에 넘기지 않는다(입력창을 고치거나 비우면 풀린다).
@@ -510,6 +514,7 @@
     clearPending();
     lastTranslated = null; lastTranslatedThread = null;
     bypassUntil = 0; bypassText = null;
+    if (inflightTranslation !== null) quarantineText = inflightTranslation; // 붙여넣기가 늦게 반영돼도 새 대화에서 넘기지 않는다
     if (busy) { flowSeq++; busy = false; util.toast(MSG_THREAD); }
     hideSentOriginal();
   }
@@ -744,7 +749,7 @@
     // 직전 번역 결과 기록은 입력창이 비워지면 지운다(8-2 보충).
     if (lastTranslated !== null && !busy && text() === '') { lastTranslated = null; lastTranslatedThread = null; }
     // 격리는 입력창 내용이 그 번역문이 아니게 되면(수정·비움) 푼다.
-    if (quarantineText !== null && !quarantined()) quarantineText = null;
+    if (quarantineText !== null && inflightTranslation === null && !quarantined()) quarantineText = null;
     checkComposerPresent(tid);
     const c = sel.composer();
     if (c !== observed) {
@@ -781,7 +786,7 @@
       onKeyEvent: onKeyEvent, onPointerEvent: onPointerEvent, onCompositionEnd: onCompositionEnd, onFocusOut: onFocusOut,
       onThreadChanged: onThreadChanged,
       state: function () { return { busy: busy, lastTranslated: lastTranslated, pending: pendingActive(), bypass: bypassActive(), quarantine: quarantineText }; },
-      checkComposerPresent: checkComposerPresent, tickClear: function () { if (quarantineText !== null && !quarantined()) quarantineText = null; },
+      checkComposerPresent: checkComposerPresent, tickClear: function () { if (quarantineText !== null && inflightTranslation === null && !quarantined()) quarantineText = null; },
       setLang: function (tid, l) { lang = l; langThread = tid; loadingThread = tid; }
     }
   };
