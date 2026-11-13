@@ -50,7 +50,7 @@ class Row:
     time_label: str | None = None
 
 
-NOTIFY_FOLDERS = ("primary", "general", "chats")  # lists that alert and count towards the unread total
+NOTIFY_FOLDERS = ("primary", "general", "requests", "chats")  # alerting lists, also counted in unread totals
 
 
 def unread_known_key(channel: str, account: str) -> str:
@@ -173,6 +173,10 @@ def render(conn: sqlite3.Connection, channel: str, account: str, group: list[sql
         key = (n["folder"], n["thread_name"])
         latest.pop(key, None)
         latest[key] = n
+    if channel == "instagram":
+        categories = [f"{label} {sum(folder == key for folder, _ in latest)}건"
+                      for key, label in FOLDER_LABEL.items() if any(folder == key for folder, _ in latest)]
+        lines.append("• 카테고리: " + " · ".join(categories))
     shown = list(latest.values())[:MAX_LINES]
     for n in shown:
         folder = FOLDER_LABEL.get(n["folder"] or "")

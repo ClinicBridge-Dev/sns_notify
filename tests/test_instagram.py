@@ -57,6 +57,27 @@ def test_new_preview_on_still_unread_thread_is_a_new_notice(mapped):
     assert [r[1] for r in notices(mapped)] == ["Hi", "Are you there?"]
 
 
+@pytest.mark.parametrize("typing", ["Typing...", "Typing…", "입력 중…", "入力中"])
+def test_typing_then_summary_only_notifies_once(mapped, typing):
+    routes = {"daclinic_en": 1}
+    base(mapped, routes)
+    assert ingest(mapped, payload(("A", typing, True)), routes) == []
+    ingest(mapped, payload(("A", "4+ new messages", True)), routes)
+    for unread in (True, False):
+        assert ingest(mapped, payload(("A", typing, unread)), routes) == []
+        assert ingest(mapped, payload(("A", "4+ new messages", True)), routes) == []
+    assert [r["preview"] for r in notices(mapped)] == ["4+ new messages"]
+    ingest(mapped, payload(("A", "A real new message", True)), routes)
+    assert len(notices(mapped)) == 2
+
+
+def test_typing_does_not_swallow_read_to_unread_transition(mapped):
+    routes = {"daclinic_en": 1}
+    ingest(mapped, payload(("A", "Hello", False)), routes)
+    assert ingest(mapped, payload(("A", "Typing...", True)), routes) == []
+    assert len(ingest(mapped, payload(("A", "Hello", True)), routes)) == 1
+
+
 def test_read_then_unread_again_notifies(mapped):
     routes = {"daclinic_en": 1}
     base(mapped, routes)
@@ -81,10 +102,38 @@ def test_general_folder_and_unmapped_account(mapped):
     assert (r["folder"], r["client_id"], r["slack_status"]) == ("general", None, "skipped")
 
 
-def test_requests_folder_is_recorded_but_never_alerts(mapped):
+def test_requests_folder_alerts_once_after_silent_baseline(mapped):
     routes = {"daclinic_en": 1}
     base(mapped, routes, "requests")
-    ingest(mapped, payload(("Spam", "hey", True), folder="requests"), routes)
+    ingest(mapped, payload(("New customer", "hey", True), folder="requests"), routes)
+    ingest(mapped, payload(("New customer", "hey", True), folder="requests"), routes)
+    assert [(r['folder'], r['slack_status']) for r in notices(mapped)] == [('requests', 'pending')]
+    assert summary(mapped)['watch'][0]['folder'] == 'requests'
+
+
+async def test_all_three_categories_are_sent_and_counted(mapped):
+    routes = {"daclinic_en": 1}
+    base(mapped, routes, 'primary', 'general', 'requests')
+    for folder in ('primary', 'general', 'requests'):
+        ingest(mapped, payload(('Same name', 'hello', True), folder=folder), routes)
+    # Repeated previews in one category are grouped as one new conversation in the burst.
+    ingest(mapped, payload(('Same name', 'second message', True), folder='requests'), routes)
+    poster = FakePoster()
+    await NoticeSender(mapped, poster, tokens={'TOK': 'xoxb'}).tick()
+    assert len(poster.posts) == 1
+    text = poster.posts[0][2]
+    assert '• 새로운 알림: 3건' in text
+    assert '• 확인하지 않은 알림: 3건' in text
+    assert '• 카테고리: Primary 1건 · General 1건 · 요청 1건' in text
+    for label in ('Primary', 'General', '요청'):
+        assert f'Same name ({label})' in text
+    assert '(요청)*: second message' in text
+
+
+def test_unknown_folder_still_does_not_alert(mapped):
+    routes = {'daclinic_en': 1}
+    base(mapped, routes, 'unknown')
+    ingest(mapped, payload(('A', 'hello', True), folder='unknown'), routes)
     assert notices(mapped) == []
 
 
@@ -125,13 +174,14 @@ def test_same_name_in_primary_and_general_do_not_disturb_each_other(mapped):
     assert [(r["thread_name"], r["folder"]) for r in notices(mapped)] == [("Kim", "general")]
 
 
-def test_requests_folder_does_not_count_or_swallow(mapped):
+def test_requests_and_primary_have_independent_cursors_and_counts(mapped):
     routes = {"daclinic_en": 1}
     base(mapped, routes, "primary", "requests")
     ingest(mapped, payload(("Zoe", "hi", True), ("Spam", "x", True), folder="requests"), routes)
-    assert summary(mapped)["instagram"][0]["unread_total"] == 0
+    assert summary(mapped)["instagram"][0]["unread_total"] == 2
     ingest(mapped, payload(("Zoe", "hi", True)), routes)  # accepted: now shows in Primary
-    assert [(r["thread_name"], r["folder"]) for r in notices(mapped)] == [("Zoe", "primary")]
+    assert [(r["thread_name"], r["folder"]) for r in notices(mapped)] == [("Zoe", "requests"), ("Spam", "requests"), ("Zoe", "primary")]
+    ingest(mapped, payload(folder='requests'), routes)  # requests have been accepted/removed
     assert summary(mapped)["instagram"][0]["unread_total"] == 1
 
 
@@ -239,6 +289,7 @@ def test_ingest_endpoint_requires_token(db_path, monkeypatch):
     assert c.post("/api/ingest/instagram", json=body, headers={"X-LW-Ingest-Token": "wrong"}).status_code == 401
     r = c.post("/api/ingest/instagram", json=body, headers={"X-LW-Ingest-Token": "t" * 32})
     assert r.status_code == 200 and r.json()["new"] == 1
+    assert r.json()["warning"] == "instagram_account_unmapped"
     bad = {**body, "threads": [{"name": "x"}] * 1000}
     assert c.post("/api/ingest/instagram", json=bad, headers={"X-LW-Ingest-Token": "t" * 32}).status_code == 422
 
@@ -255,3 +306,33 @@ def test_client_without_slack_channel_is_skipped(db):
     ingest(db, payload(), {"daclinic_en": 5})
     ingest(db, payload(("A", "x", True)), {"daclinic_en": 5})
     assert notices(db)[0]["slack_status"] == "skipped"
+
+
+def test_presence_prefix_does_not_mix_customers_or_repeat_notices(mapped):
+    routes = {"daclinic_en": 1}
+    base(mapped, routes)
+    ad = 'Loula Mosseri replied to an ad. View ad(https://www.instagram.com/p/De89w9tgSWn/)'
+    ingest(mapped, payload(("Loula Mosseri", ad, True)), routes)
+    for _ in range(4):
+        # Another customer's online badge used to overwrite the shared '활동 중' cursor.
+        ingest(mapped, payload(("활동 중", "Shawn님 회원님: Hello", False)), routes)
+        assert ingest(mapped, payload(("활동 중", "Loula Mosseri님 " + ad, True)), routes) == []
+        assert ingest(mapped, payload(("Loula Mosseri", ad, True)), routes) == []
+    assert [(r['thread_name'], r['preview']) for r in notices(mapped)] == [('Loula Mosseri', ad)]
+    assert len(ingest(mapped, payload(("활동 중", "Loula Mosseri님 A new question", True)), routes)) == 1
+    assert notices(mapped)[-1]['thread_name'] == 'Loula Mosseri'
+
+
+def test_presence_prefix_first_notice_has_real_name(mapped):
+    routes = {"daclinic_en": 1}
+    base(mapped, routes)
+    ingest(mapped, payload(("활동 중", "Loula Mosseri님 Hello", True)), routes)
+    assert [(r['thread_name'], r['preview']) for r in notices(mapped)] == [('Loula Mosseri', 'Hello')]
+    assert ingest(mapped, payload(("Active now", "ambiguous text", True)), routes) == []
+
+
+def test_presence_word_in_message_is_preserved(mapped):
+    routes = {"daclinic_en": 1}
+    base(mapped, routes)
+    ingest(mapped, payload(("Loula", "활동 중", True)), routes)
+    assert notices(mapped)[0]['preview'] == '활동 중'

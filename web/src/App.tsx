@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { checkMe, logout, setUnauthorizedHandler } from './api';
 import LoginScreen from './components/LoginScreen';
 import Viewer from './components/Viewer';
+import InstagramSettings from './components/InstagramSettings';
 
 type AuthState = 'checking' | 'login' | 'authed' | 'offline';
 
@@ -64,5 +65,7 @@ export default function App() {
       />
     );
   }
-  return <Viewer onLogout={handleLogout} />;
+  return window.location.pathname === '/manage'
+    ? <InstagramSettings onLogout={handleLogout} />
+    : <Viewer onLogout={handleLogout} />;
 }

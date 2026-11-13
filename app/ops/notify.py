@@ -49,7 +49,7 @@ def check_instagram_watch(conn: sqlite3.Connection, stale_sec: float = IG_STALE_
     from ..db.repo import ops_event
 
     now = datetime.now(timezone.utc)
-    for w in conn.execute("SELECT account, folder, snapshot_at FROM notice_folders WHERE channel='instagram' AND folder IN ('primary','general')"):
+    for w in conn.execute("SELECT account, folder, snapshot_at FROM notice_folders WHERE channel='instagram' AND folder IN ('primary','general','requests')"):
         key = f"ig_stale:{w['account']}:{w['folder']}"
         stale = (now - datetime.fromisoformat(w["snapshot_at"])).total_seconds() > stale_sec
         was = meta_get(conn, key) == "1"

@@ -1,5 +1,7 @@
 # SNS 새 메시지 알림 (sns_notify) 기획서
 
+> **레거시 (2026-11-12).** 이 문서는 기존 Mac mini 수집기 제품의 기획서다. 현재 메인 제품은 Meta 수신함 확장 프로그램이며 기준 문서는 `docs/etc/meta-inbox-extension-implementation-spec.md`다.
+
 > 최종 갱신: 2026-11-10 · 현재 상태: MVP를 "새 메시지 알림"으로 좁혀 코드 완성(자동 시험 통과), 실제 계정·Slack 연결 확인 전 · 원본: `sns_notify/docs/PRODUCT_SPEC.md` · 예전 이름: 왓츠앱 로컬 수집기(local-whatsapp)
 
 ## 최근 업데이트 (최신 3개)

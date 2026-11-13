@@ -25,7 +25,7 @@ Mac mini 한 대에서 상담용 WhatsApp 화면을 읽어 로컬 SQLite에 저�
 고객의 새 메시지만 고객사 Slack 채널로 알리고, 직원이 읽기 전용 화면에서 대화를 보는 서비스.
 계획: `docs/etc/2026-11-09-impl-plan.md` · 기획서: `docs/PRODUCT_SPEC.md`
 
-> **MVP (2026-11-10): 새 메시지 알림.** 왓츠앱 대화 목록과 인스타그램 DM 목록(Primary·General)만 보고
+> **MVP (2026-11-10): 새 메시지 알림.** 왓츠앱 대화 목록과 인스타그램 DM 목록(Primary·General·요청)만 보고
 > "새로운 N건 / 확인하지 않은 M건 + 미리보기"를 Slack으로 보낸다. 대화방을 열지 않아 안 읽음 뱃지가 남는다.
 > 설치·운영은 **`docs/OPERATIONS.md`**. 왓츠앱 계정은 기본이 `mode: notify`(목록만 읽기)이고, 아래의 전체 대화
 > 저장·번역·뷰어는 `mode: collect`일 때만 동작한다(대화방을 열므로 읽음 처리됨).

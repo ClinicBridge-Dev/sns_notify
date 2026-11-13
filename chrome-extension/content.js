@@ -46,11 +46,12 @@
     if (!root) return null;
     const account = accountName(root);
     if (!account) return null;
+    const threads = rows(root).slice(0, 100);
     return {
       account,
       folder: CBParse.folderFrom(selectedTab(), location.pathname),
-      unread_total: CBParse.unreadFromTitle(document.title),
-      threads: rows(root).slice(0, 100),
+      unread_total: threads.filter((t) => t.unread).length,
+      threads,
     };
   }
 

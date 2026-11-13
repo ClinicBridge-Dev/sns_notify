@@ -48,7 +48,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new UnauthorizedError();
   }
   if (!res.ok) {
-    throw new ApiError(res.status, `${res.status} ${res.statusText}`);
+    const body = await res.json().catch(() => null);
+    throw new ApiError(res.status, typeof body?.detail === 'string' ? body.detail : `${res.status} ${res.statusText}`);
   }
   const text = await res.text();
   return (text ? JSON.parse(text) : null) as T;
@@ -122,4 +123,38 @@ export function getMessages(
 
 export function isAbortError(e: unknown): boolean {
   return e instanceof DOMException && e.name === 'AbortError';
+}
+
+export interface InstagramAccount {
+  account: string;
+  state: 'connected' | 'unmapped' | 'paused' | 'inactive';
+  channel_id: string | null;
+  token_ref: string | null;
+  destination_name: string | null;
+  folders: { folder: string; snapshot_at: string }[];
+  latest_notice: { created_at: string; slack_status: string; last_error: string | null } | null;
+}
+export interface SlackChannel {
+  id: string;
+  name: string;
+  private: boolean;
+  token_ref: string;
+  workspace: string;
+}
+export interface SlackChannels {
+  channels: SlackChannel[];
+  errors: { token_ref: string; message: string }[];
+}
+export function getInstagramAccounts(signal?: AbortSignal) {
+  return request<{ accounts: InstagramAccount[] }>('/api/manage/instagram', { signal });
+}
+export function getSlackChannels(signal?: AbortSignal) {
+  return request<SlackChannels>('/api/manage/slack-channels', { signal });
+}
+export function saveInstagramRoute(account: string, channel: SlackChannel | null) {
+  return request<{ ok: boolean }>(`/api/manage/instagram/${encodeURIComponent(account)}`, {
+    method: 'PUT',
+    headers: { 'X-Requested-With': 'sns-notify' },
+    body: JSON.stringify({ channel_id: channel?.id ?? null, token_ref: channel?.token_ref ?? null }),
+  });
 }

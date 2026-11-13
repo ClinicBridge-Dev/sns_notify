@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "CB 메시지 감시",
-  "version": "0.1.0",
-  "description": "인스타그램 DM 목록(Primary/General)에서 새 메시지가 왔는지만 확인해 수집기에 알립니다. 대화방은 열지 않습니다.",
+  "version": "0.1.1",
+  "description": "인스타그램 DM 목록(Primary/General/요청)에서 새 메시지가 왔는지 확인해 수집기에 알립니다. 대화방은 열지 않습니다.",
   "permissions": ["storage"],
   "host_permissions": ["https://www.instagram.com/*", "http://localhost/*", "http://127.0.0.1/*"],
   "background": { "service_worker": "background.js" },

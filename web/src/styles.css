@@ -784,3 +784,31 @@ button {
 .new-pill:hover {
   background: #1a62d1;
 }
+
+/* Instagram account routing */
+.routing-page { min-height: 100%; background: var(--bg); }
+.routing-header { display: flex; align-items: center; justify-content: space-between; padding: 16px 28px; background: var(--surface); border-bottom: 1px solid var(--border); }
+.routing-header a { color: var(--text-2); text-decoration: none; }
+.routing-main { max-width: 1120px; margin: 0 auto; padding: 36px 24px; }
+.routing-title { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.routing-eyebrow { color: var(--accent); font-size: 11px; letter-spacing: .1em; font-weight: 700; margin: 0 0 8px; }
+.routing-title h1 { font-size: 28px; margin: 0; letter-spacing: -.04em; }
+.routing-intro { color: var(--text-2); font-size: 15px; margin: 18px 0; line-height: 1.7; }
+.routing-help { background: var(--blue-soft); color: var(--text-2); padding: 14px 16px; border-radius: 8px; margin-bottom: 24px; line-height: 1.7; }
+.routing-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; margin: 24px 0; }
+.routing-card { padding: 22px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); box-shadow: 0 2px 6px #1d233005; }
+.routing-card-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.routing-card h2 { font-size: 18px; margin: 0; overflow-wrap: anywhere; }
+.routing-card label { display: block; font-weight: 600; margin: 20px 0 8px; }
+.routing-controls { display: flex; gap: 8px; }
+.routing-controls select { min-width: 0; flex: 1; }
+.routing-live { color: var(--green); }
+.routing-folders { display: flex; gap: 8px; flex-wrap: wrap; }
+.routing-folders span { background: var(--surface-2); border: 1px solid var(--border); color: var(--text-2); padding: 3px 8px; border-radius: 5px; font-size: 11px; }
+.routing-delivery { border-top: 1px solid var(--border); padding-top: 14px; margin-bottom: 0; overflow-wrap: anywhere; }
+@media (max-width: 760px) {
+  .routing-grid { grid-template-columns: 1fr; }
+  .routing-main { padding: 24px 16px; }
+  .routing-title { align-items: flex-start; flex-direction: column; }
+  .routing-header { padding: 12px 16px; }
+}

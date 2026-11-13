@@ -43,6 +43,7 @@ export default function StatusBar({ status, live, now, onLogout }: Props) {
   return (
     <header className="statusbar">
       <div className="sb-brand">WhatsApp 대화 뷰어</div>
+      <a className="btn" href="/manage">알림 계정 관리</a>
 
       <div className="sb-group sb-accounts">
         {status === null && <span className="muted">상태 확인 중…</span>}

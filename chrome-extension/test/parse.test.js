@@ -32,9 +32,33 @@ test('unread total from title', () => {
   assert.strictEqual(P.unreadFromTitle('Instagram'), 0);
 });
 
+test('requests path overrides an inbox tab retained in the sidebar', () => {
+  assert.strictEqual(P.folderFrom('Primary', '/direct/requests/'), 'requests');
+  assert.strictEqual(P.folderFrom('General', '/direct/requests/'), 'requests');
+  assert.strictEqual(P.folderFrom('Message requests (2)', '/direct/inbox/'), 'requests');
+  assert.strictEqual(P.folderFrom('메시지 요청', '/direct/inbox/'), 'requests');
+  assert.strictEqual(P.folderFrom('リクエスト', '/direct/inbox/'), 'requests');
+  assert.strictEqual(P.folderFrom(null, '/direct/t/123/'), 'unknown');
+});
+
 test('non-message rows (notes bubble, empty chat) are not message rows', () => {
   assert.strictEqual(P.isMessageRow(P.parseRowLines(['새 소식...', '내 메모'])), false);
   assert.strictEqual(P.isMessageRow(P.parseRowLines(['Instagram 사용자님', '채팅하려면 클릭하세요'])), false);
   assert.strictEqual(P.isMessageRow(P.parseRowLines(['A님', 'hi', '·', '3분'])), true);
   assert.strictEqual(P.isMessageRow(P.parseRowLines(['A님', 'hi', 'Unread'])), true);
+});
+
+test('avatar presence is not the sender name and does not change the preview', () => {
+  const body = 'Loula Mosseri replied to an ad. View ad(https://www.instagram.com/p/De89w9tgSWn/)';
+  const normal = P.parseRowLines(['Loula Mosseri님', body, '·', '7시간', 'Unread']);
+  for (const presence of ['활동 중', '지금 활동 중', 'Active now', 'Active today', 'Online']) {
+    assert.deepStrictEqual(P.parseRowLines([presence, 'Loula Mosseri님', body, '·', '7시간', 'Unread']), normal);
+  }
+  assert.strictEqual(normal.name, 'Loula Mosseri');
+  assert.strictEqual(normal.preview, body);
+});
+
+test('presence wording in message content is preserved', () => {
+  assert.strictEqual(P.parseRowLines(['Loula님', '활동 중', '1분', 'Unread']).preview, '활동 중');
+  assert.strictEqual(P.isMessageRow(P.parseRowLines(['활동 중'])), false);
 });

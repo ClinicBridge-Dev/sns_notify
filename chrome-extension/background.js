@@ -25,7 +25,7 @@ async function forward(data, tabId) {
         body: JSON.stringify(data),
       });
       const body = await r.json().catch(() => ({}));
-      result = r.ok ? { ok: true, new: body.new || 0 } : { ok: false, error: `HTTP ${r.status} ${body.error || ''}` };
+      result = r.ok ? { ok: true, new: body.new || 0, warning: body.warning } : { ok: false, error: `HTTP ${r.status} ${body.error || ''}` };
     } catch (e) {
       result = { ok: false, error: `수집기에 연결할 수 없음 (${serverUrl})` };
     }

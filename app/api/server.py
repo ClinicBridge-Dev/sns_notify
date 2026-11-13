@@ -1,4 +1,4 @@
-"""FastAPI app: read-only REST + SSE + static viewer. There are no write endpoints besides login/logout."""
+"""FastAPI app: conversation viewer, authenticated routing management, and ingestion."""
 from __future__ import annotations
 
 import asyncio
@@ -20,6 +20,7 @@ import os
 from ..notices.instagram import SETTLE_SEC, Snapshot, ingest as ingest_instagram
 from .auth import COOKIE, PUBLIC_API, TOKEN_API_PREFIX, NoAuth, SessionAuth
 from .bus import Bus
+from .instagram_admin import active_routes, router as admin_router, seed_routes
 
 STATIC = Path(__file__).resolve().parent.parent / "static"
 
@@ -47,6 +48,13 @@ def create_app(conn_factory: Callable[[], sqlite3.Connection], auth: SessionAuth
 
     def db() -> sqlite3.Connection:
         return conn_factory()
+
+    seed_conn = db()
+    try:
+        seed_routes(seed_conn, instagram_routes or {})
+    finally:
+        seed_conn.close()
+    app.include_router(admin_router(conn_factory))
 
     @app.get("/api/health")
     def health():
@@ -83,10 +91,14 @@ def create_app(conn_factory: Callable[[], sqlite3.Connection], auth: SessionAuth
             return JSONResponse({"error": "unauthorized"}, status_code=401)
         c = db()
         try:
-            new = ingest_instagram(c, snap, instagram_routes or {}, settle_sec=instagram_settle_sec)
+            routes = active_routes(c)
+            new = ingest_instagram(c, snap, routes, settle_sec=instagram_settle_sec)
         finally:
             c.close()
-        return {"ok": True, "new": len(new)}
+        result = {"ok": True, "new": len(new)}
+        if snap.account not in routes:
+            result["warning"] = "instagram_account_unmapped"
+        return result
 
     @app.post("/api/logout")
     def logout():

@@ -26,7 +26,7 @@ def summary(conn: sqlite3.Connection) -> dict:
         dict(r)
         for r in conn.execute(
             """SELECT channel, account, folder, snapshot_at FROM notice_folders
-               WHERE folder IN ('primary','general','chats') ORDER BY channel, account, folder"""
+               WHERE folder IN ('primary','general','requests','chats') ORDER BY channel, account, folder"""
         )
     ]
     ncounts = dict(conn.execute("SELECT slack_status, count(*) FROM notices GROUP BY slack_status").fetchall())
