@@ -41,6 +41,7 @@
         "lib/bubblecache.js",
         "content/selectors.js",
         "content/util.js",
+        "content/inject.js",
         "content/composer.js",
         "content/bubbles.js",
         "content/watcher.js"

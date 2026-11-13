@@ -2,146 +2,398 @@
 <html lang="ko">
 <head>
   <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Meta Inbox Helper 설정</title>
   <link rel="stylesheet" href="options.css">
 </head>
 <body>
-  <h1>Meta Inbox Helper 설정</h1>
-
-  <section id="sec-quick-replies">
-    <h2>빠른 메시지</h2>
-    <p class="hint">저장하면 바로 반영됩니다. 제목 50자, 본문 2000자, 최대 500개.</p>
-    <ul id="qr-list" class="qr-list"></ul>
-    <p id="qr-empty" class="hint" hidden>등록된 빠른 메시지가 없습니다.</p>
-    <form id="qr-form" class="qr-form" autocomplete="off">
-      <h3 id="qr-form-title">새 빠른 메시지</h3>
-      <label>제목 <input id="qr-title" maxlength="50" required></label>
-      <label>본문 <textarea id="qr-text" rows="4" maxlength="2000" required></textarea></label>
-      <label>태그 (쉼표로 구분) <input id="qr-tags"></label>
-      <div class="row">
-        <button type="submit" id="qr-save">추가</button>
-        <button type="button" id="qr-cancel" hidden>수정 취소</button>
+  <header class="top">
+    <div class="topin">
+      <div class="brand">
+        <span class="logo" aria-hidden="true"><svg viewBox="0 0 16 16" fill="none" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z"/></svg></span>
+        <b>Meta Inbox Helper</b><small id="ver-top"></small>
       </div>
-      <p id="qr-form-msg" class="msg" role="status"></p>
-    </form>
-    <div class="row">
-      <button type="button" id="qr-export">내보내기</button>
-      <button type="button" id="qr-import-btn">가져오기</button>
-      <input type="file" id="qr-import-file" accept=".json,application/json" hidden>
-    </div>
-    <div id="qr-import-panel" class="panel" hidden>
-      <p id="qr-import-summary"></p>
-      <ul id="qr-import-errors" class="errors"></ul>
-      <div id="qr-import-choice" hidden>
-        <label><input type="radio" name="qr-mode" value="merge" checked> 합치기 (id가 같으면 덮어쓰고, 없으면 추가)</label>
-        <label><input type="radio" name="qr-mode" value="replace"> 전체 교체</label>
-        <p id="qr-import-counts"></p>
-        <div class="row">
-          <button type="button" id="qr-import-apply">적용</button>
-          <button type="button" id="qr-import-cancel">취소</button>
-        </div>
+      <div class="chips" role="group" aria-label="상태">
+        <button type="button" class="chip" id="chip-detect" data-go="slack"><span class="dot" aria-hidden="true"></span><span class="k">감지</span><span class="v">확인 중</span></button>
+        <button type="button" class="chip" id="chip-slack" data-go="slack"><span class="dot" aria-hidden="true"></span><span class="k">Slack</span><span class="v">확인 중</span></button>
+        <button type="button" class="chip" id="chip-translate" data-go="translate"><span class="dot" aria-hidden="true"></span><span class="k">번역</span><span class="v">확인 중</span></button>
       </div>
     </div>
-    <p id="qr-io-msg" class="msg" role="status"></p>
-  </section>
+  </header>
 
-  <section id="sec-slack">
-    <h2>Slack</h2>
-    <label class="inline"><input type="checkbox" id="slackEnabled"> Slack 알림 사용</label>
-    <p class="hint">여러 사람이 각자 설치하면 같은 알림이 사람 수만큼 게시됩니다. 알림 담당 브라우저 1대에서만 "Slack 알림 사용"을 켜고, 나머지 브라우저에서는 끄세요(끄면 오류로 표시되지 않습니다).</p>
-    <label>미리보기 길이 (자) <input type="number" id="slackPreviewMaxLen" min="1" max="1000" step="1"></label>
-    <label class="inline"><input type="checkbox" id="slackMaskPhone"> 전화번호 가리기</label>
-  </section>
+  <div class="page">
+    <div class="body">
+      <nav aria-label="설정 메뉴">
+        <ul>
+          <li><button type="button" data-nav="start" data-go="start"><svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 4.5h8M6 9h8M6 13.5h8"/><path d="m2.5 4.5.7.7L4.5 3.8M2.5 9l.7.7L4.5 8.3"/><circle cx="3.4" cy="13.5" r=".9"/></svg><span>시작하기</span><i class="badge" id="nav-start-badge" hidden><span class="vh">확인 필요</span></i></button></li>
+          <li><button type="button" data-nav="slack" data-go="slack"><svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 2.5a4.5 4.5 0 0 0-4.5 4.5v3l-1.5 2.5h12L13.5 10V7A4.5 4.5 0 0 0 9 2.5Z"/><path d="M7.3 14.5a1.8 1.8 0 0 0 3.4 0"/></svg><span>Slack 알림</span></button></li>
+          <li><button type="button" data-nav="translate" data-go="translate"><svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 4h7M6 2.5V4c0 3-1.6 5.3-3.5 6.5M4.5 7c.8 1.6 2.2 2.8 4 3.5"/><path d="m9 15.5 3-7 3 7M10 13.3h4"/></svg><span>번역</span></button></li>
+          <li><button type="button" data-nav="quick" data-go="quick"><svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><path d="M10 2 4 10h4.5L8 16l6-8H9.5L10 2Z"/></svg><span>빠른 메시지</span></button></li>
+          <li><button type="button" data-nav="help" data-go="help"><svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="9" cy="9" r="6.5"/><path d="M7.2 7.2a1.9 1.9 0 1 1 2.6 1.8c-.5.2-.8.6-.8 1.1v.4"/><circle cx="9" cy="12.6" r=".5" fill="currentColor"/></svg><span>도움말</span></button></li>
+        </ul>
+      </nav>
 
-  <section id="sec-slack-connect">
-    <h2>Slack 연결</h2>
-    <div id="webhook-masked" class="row" hidden>
-      <code id="webhook-masked-text"></code>
-      <button type="button" id="webhook-change">변경</button>
+      <main>
+        <!-- ================= 시작하기 ================= -->
+        <section class="panel" id="sec-start" data-section="start" aria-labelledby="h-start">
+          <h1 id="h-start" tabindex="-1">시작하기</h1>
+
+          <section class="card" id="setup-card" aria-labelledby="h-setup">
+            <h2 id="h-setup">처음 설정</h2>
+            <p class="sub">위에서부터 차례로 끝내면 알림과 번역이 모두 동작합니다.</p>
+            <div class="prog"><span class="num" id="prog-text">0 / 5 완료</span><span class="bar" aria-hidden="true"><i id="prog-bar"></i></span></div>
+            <ol class="steps">
+              <li class="step" id="step-permissions">
+                <span class="mark"></span>
+                <div>
+                  <b>사이트 액세스 권한 허용</b>
+                  <small class="desc"></small>
+                  <div class="hosts" id="hosts"></div>
+                  <div class="perm-help" id="perm-help" hidden>
+                    <p><b>브라우저의 확장 프로그램 관리 화면에서 사이트 액세스를 허용하세요.</b></p>
+                    <ol>
+                      <li>주소창에 <code>chrome://extensions</code> 를 입력해 엽니다.</li>
+                      <li>Meta Inbox Helper의 [세부정보]를 누릅니다.</li>
+                      <li>"사이트 액세스"에서 위 네 곳이 모두 허용되도록 바꿉니다(예: "모든 사이트에서" 또는 각 사이트 허용).</li>
+                      <li>이 화면으로 돌아오면 10초 안에 허용 여부가 다시 표시됩니다.</li>
+                    </ol>
+                    <div class="actions"><button type="button" class="btn sm" id="btn-copy-ext-url">관리 화면 주소 복사</button><span class="result" id="copy-ext-result" role="status"></span></div>
+                  </div>
+                  <p class="result" id="perm-result" role="status"></p>
+                </div>
+                <div class="step-act"><button type="button" class="btn pri" id="btn-grant" hidden>권한 허용</button></div>
+              </li>
+              <li class="step" id="step-webhook"><span class="mark"></span><div><b>Slack Webhook 주소 입력</b><small class="desc"></small></div><div class="step-act"><button type="button" class="btn sm" data-go="slack" data-focus="webhook">설정하기</button></div></li>
+              <li class="step" id="step-account"><span class="mark"></span><div><b>알림 대상 계정 지정</b><small class="desc"></small></div><div class="step-act"><button type="button" class="btn sm" data-go="slack" data-focus="account">설정하기</button></div></li>
+              <li class="step" id="step-deepl"><span class="mark"></span><div><b>DeepL 키 입력</b><small class="desc"></small></div><div class="step-act"><button type="button" class="btn sm" data-go="translate" data-focus="deepl">설정하기</button></div></li>
+              <li class="step" id="step-slackTest"><span class="mark"></span><div><b>Slack 테스트 메시지 보내기</b><small class="desc"></small></div><div class="step-act"><button type="button" class="btn sm" data-go="slack" data-focus="test">설정하기</button></div></li>
+            </ol>
+          </section>
+
+          <section class="card" id="setup-done" hidden>
+            <div class="donebar"><span class="mark done" aria-hidden="true"><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 7.5 2.5 2.5L11 4.5"/></svg></span><h2>설정이 완료되었습니다</h2></div>
+          </section>
+
+          <section class="card" aria-labelledby="h-now">
+            <h2 id="h-now">현재 상태</h2>
+            <p class="sub">10초마다 다시 읽습니다. 이 화면은 Slack이나 DeepL로 요청을 보내지 않습니다.</p>
+            <dl class="kv">
+              <dt>마지막 감지 신호</dt><dd id="st-heartbeat">-</dd>
+              <dt>감지 담당 탭</dt><dd id="st-owner">-</dd>
+              <dt>마지막 Slack 전송</dt><dd id="st-send">-</dd>
+              <dt>대기 중 알림</dt><dd id="st-queue">-</dd>
+              <dt>최근 오류</dt><dd id="st-error">-</dd>
+            </dl>
+          </section>
+        </section>
+
+        <!-- ================= Slack 알림 ================= -->
+        <section class="panel" id="sec-slack" data-section="slack" aria-labelledby="h-slack" hidden>
+          <h1 id="h-slack" tabindex="-1">Slack 알림</h1>
+          <div class="alert" id="slack-perm-alert" hidden>
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M8 2 1.5 13.5h13Z" stroke-linejoin="round"/><path d="M8 6.5v3.2"/><circle cx="8" cy="11.6" r=".5" fill="currentColor"/></svg>
+            <span>hooks.slack.com 사이트 액세스 권한이 꺼져 있어 알림을 보낼 수 없습니다. <button type="button" class="btn sm" data-go="start">시작하기에서 허용</button></span>
+          </div>
+
+          <section class="card" id="card-slack-connect" aria-labelledby="h-slack-connect">
+            <h2 id="h-slack-connect">연결</h2>
+            <p class="sub">새 메시지가 오면 이 Webhook의 Slack 채널로 알림을 보냅니다.</p>
+            <div class="row">
+              <div class="lbl"><b id="lbl-slackEnabled">Slack 알림 사용</b><small id="desc-slackEnabled">끄면 알림을 보내지 않고, 오류로 표시하지도 않습니다.</small></div>
+              <button type="button" class="sw" role="switch" id="slackEnabled" aria-checked="false" aria-labelledby="lbl-slackEnabled" aria-describedby="desc-slackEnabled"></button>
+            </div>
+            <div class="field">
+              <label for="webhook-input" id="lbl-webhook">Webhook 주소</label>
+              <div class="masked" id="webhook-masked" hidden>
+                <code id="webhook-masked-text" aria-labelledby="lbl-webhook"></code>
+                <button type="button" class="btn sm" id="webhook-change">변경</button>
+              </div>
+              <form id="webhook-form" class="inline-form" autocomplete="off" novalidate>
+                <div class="masked">
+                  <input class="inp" type="password" id="webhook-input" placeholder="https://hooks.slack.com/services/..." autocomplete="off" spellcheck="false" aria-describedby="webhook-err">
+                  <button type="submit" class="btn sm">저장</button>
+                  <button type="button" class="btn sm" id="webhook-cancel" hidden>취소</button>
+                </div>
+                <span class="ferr" id="webhook-err" role="alert"></span>
+              </form>
+              <span class="result" id="webhook-msg" role="status"></span>
+            </div>
+            <div class="actions">
+              <button type="button" class="btn pri" id="btn-test-slack">테스트 메시지 보내기</button>
+              <span class="result" id="test-slack-result" role="status"></span>
+            </div>
+          </section>
+
+          <section class="card" id="card-account" aria-labelledby="h-account">
+            <h2 id="h-account">알림 대상 계정</h2>
+            <p class="sub">이 계정의 수신함에서 감지한 메시지만 알립니다.</p>
+            <div class="field">
+              <label for="accountName">계정 이름 (Slack 알림에 표시)</label>
+              <form id="account-form" class="masked" autocomplete="off">
+                <input class="inp" id="accountName" maxlength="100" aria-describedby="account-msg">
+                <button type="submit" class="btn sm">저장</button>
+              </form>
+              <span class="result" id="account-msg" role="status"></span>
+            </div>
+            <div class="field">
+              <span class="flabel" id="lbl-asset">지정된 계정 번호</span>
+              <div class="masked">
+                <code id="asset-current" class="strong" aria-labelledby="lbl-asset">(없음)</code>
+                <button type="button" class="btn pri" id="btn-set-asset">현재 수신함을 알림 대상으로 지정</button>
+              </div>
+              <span class="result" id="asset-result" role="status"></span>
+              <div id="asset-choices" class="choices" role="group" aria-label="알림 대상 계정 선택" hidden></div>
+            </div>
+          </section>
+
+          <section class="card" id="card-slack-content" aria-labelledby="h-slack-content">
+            <h2 id="h-slack-content">알림 내용</h2>
+            <p class="sub">Slack 알림에 넣는 미리보기를 정합니다.</p>
+            <div class="row">
+              <div class="lbl"><label for="slackPreviewMaxLen"><b>미리보기 길이</b></label><small>메시지 내용을 이 글자 수까지만 보냅니다.</small></div>
+              <select class="inp auto" id="slackPreviewMaxLen"></select>
+            </div>
+            <div class="row">
+              <div class="lbl"><b id="lbl-slackMaskPhone">전화번호 가리기</b><small id="desc-slackMaskPhone">보낸 사람 이름이 전화번호이면 뒤 4자리만 남깁니다.</small></div>
+              <button type="button" class="sw" role="switch" id="slackMaskPhone" aria-checked="false" aria-labelledby="lbl-slackMaskPhone" aria-describedby="desc-slackMaskPhone"></button>
+            </div>
+            <p class="cap">알림 예시 (지금 설정 반영, 예시 메시지)</p>
+            <div class="slk" aria-label="Slack 알림 예시">
+              <span class="sa" aria-hidden="true"><svg viewBox="0 0 18 18" fill="none" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"><path d="M3 4h12v7.5H9l-3.5 3V11.5H3z"/></svg></span>
+              <div class="slk-body">
+                <b>Meta Inbox Helper</b><span class="tm" id="slk-time"></span>
+                <p class="slk-head" id="slk-head"></p>
+                <div id="slk-lines"></div>
+                <p class="slk-link">수신함 열기</p>
+              </div>
+            </div>
+          </section>
+
+          <section class="card" id="card-ops" aria-labelledby="h-ops">
+            <h2 id="h-ops">운영 안내</h2>
+            <p class="sub">감지가 끊기지 않게 하는 방법과 여러 사람이 쓸 때의 주의 사항입니다.</p>
+            <details class="more">
+              <summary><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 3 4 4-4 4"/></svg>자세히</summary>
+              <ul>
+                <li>수신함 탭을 닫지 않습니다. 상담하던 탭에서 광고 관리 등 수신함 밖으로 이동하면 감지가 멈춥니다. 다른 화면은 새 탭에서 엽니다.</li>
+                <li>두 채널 모두 발신자와 미리보기를 받고 싶으면 Instagram 탭과 WhatsApp 탭을 하나씩 열어 둡니다.</li>
+                <li>브라우저의 탭 절전(메모리 절약) 대상에서 business.facebook.com을 제외합니다.</li>
+                <li>여러 사람이 각자 설치하면 같은 알림이 사람 수만큼 게시됩니다. 알림 담당 브라우저 1대에서만 "Slack 알림 사용"을 켜고, 나머지 브라우저에서는 끄세요(끄면 오류로 표시되지 않습니다).</li>
+              </ul>
+            </details>
+          </section>
+        </section>
+
+        <!-- ================= 번역 ================= -->
+        <section class="panel" id="sec-translate" data-section="translate" aria-labelledby="h-translate" hidden>
+          <h1 id="h-translate" tabindex="-1">번역</h1>
+
+          <section class="card" id="card-deepl" aria-labelledby="h-deepl">
+            <h2 id="h-deepl">DeepL 연결</h2>
+            <p class="sub">말풍선 번역과 보낼 때 번역에 같은 키를 씁니다.</p>
+            <div class="field">
+              <label for="deepl-input" id="lbl-deepl">DeepL API 키</label>
+              <div class="masked" id="deepl-masked" hidden>
+                <code id="deepl-masked-text" aria-labelledby="lbl-deepl"></code>
+                <button type="button" class="btn sm" id="deepl-change">변경</button>
+              </div>
+              <form id="deepl-form" class="inline-form" autocomplete="off">
+                <div class="masked">
+                  <input class="inp" type="password" id="deepl-input" placeholder="DeepL API 키" autocomplete="off" spellcheck="false">
+                  <button type="submit" class="btn sm">저장</button>
+                  <button type="button" class="btn sm" id="deepl-cancel" hidden>취소</button>
+                </div>
+              </form>
+              <span class="result" id="deepl-msg" role="status"></span>
+            </div>
+            <div class="actions">
+              <button type="button" class="btn pri" id="btn-check-deepl">키 확인</button>
+              <span class="result" id="deepl-check-result" role="status"></span>
+            </div>
+            <div class="usage" id="deepl-usage" hidden>
+              <div class="meta"><span>요금제 <span class="pill-tag" id="deepl-plan"></span></span><span class="num" id="deepl-usage-text"></span></div>
+              <div class="ub" aria-hidden="true"><i id="deepl-usage-bar"></i></div>
+            </div>
+            <div class="note" id="deepl-free-warning" hidden>
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M8 2 1.5 13.5h13Z" stroke-linejoin="round"/><path d="M8 6.5v3.2"/><circle cx="8" cy="11.6" r=".5" fill="currentColor"/></svg>
+              <span>무료 DeepL 키(:fx)입니다. 상담 내용이 의료 정보에 해당하면 DeepL 전송은 처리 위탁·국외 이전 검토 대상일 수 있습니다. 텍스트를 저장하지 않고 학습에 쓰지 않는다고 명시한 유료 API 요금제를 권장합니다.</span>
+            </div>
+          </section>
+
+          <section class="card" aria-labelledby="h-bubble">
+            <h2 id="h-bubble">말풍선 번역</h2>
+            <p class="sub">대화의 말풍선 아래에 번역·복사 버튼을 둡니다.</p>
+            <div class="row">
+              <div class="lbl"><b id="lbl-bubbleButtonsEnabled">말풍선 번역·복사 버튼 사용</b></div>
+              <button type="button" class="sw" role="switch" id="bubbleButtonsEnabled" aria-checked="false" aria-labelledby="lbl-bubbleButtonsEnabled"></button>
+            </div>
+            <div class="row">
+              <div class="lbl"><label for="bubbleTargetLang"><b>번역 결과 언어</b></label><small>말풍선을 번역하면 이 언어로 보여 줍니다.</small></div>
+              <select class="inp auto" id="bubbleTargetLang"></select>
+            </div>
+          </section>
+
+          <section class="card" aria-labelledby="h-send">
+            <h2 id="h-send">보낼 때 번역</h2>
+            <p class="sub">한글로 쓰고 보내면 번역한 글을 고객에게 보냅니다.</p>
+            <div class="row">
+              <div class="lbl"><b id="lbl-sendTranslateEnabled">한글 입력을 번역해 전송</b><small id="desc-sendTranslateEnabled">입력창 위 스위치로 대화마다 켜고 끌 수 있습니다</small></div>
+              <button type="button" class="sw" role="switch" id="sendTranslateEnabled" aria-checked="false" aria-labelledby="lbl-sendTranslateEnabled" aria-describedby="desc-sendTranslateEnabled"></button>
+            </div>
+            <div class="row">
+              <div class="lbl"><label for="sendTargetLang"><b>기본 대상 언어</b></label><small>대화별 언어를 정하지 않은 대화에 씁니다.</small></div>
+              <select class="inp auto" id="sendTargetLang"></select>
+            </div>
+          </section>
+        </section>
+
+        <!-- ================= 빠른 메시지 ================= -->
+        <section class="panel" id="sec-quick" data-section="quick" aria-labelledby="h-quick" hidden>
+          <h1 id="h-quick" tabindex="-1">빠른 메시지</h1>
+
+          <section class="card">
+            <div class="row flush">
+              <div class="lbl"><b id="lbl-quickRepliesEnabled">빠른 메시지 버튼 사용</b><small id="desc-quickRepliesEnabled">끄면 수신함 입력창 위의 버튼만 숨깁니다. 아래 관리 화면은 그대로 쓸 수 있습니다.</small></div>
+              <button type="button" class="sw" role="switch" id="quickRepliesEnabled" aria-checked="false" aria-labelledby="lbl-quickRepliesEnabled" aria-describedby="desc-quickRepliesEnabled"></button>
+            </div>
+          </section>
+
+          <section class="card split" aria-label="빠른 메시지 관리">
+            <div class="qleft">
+              <div class="qhead">
+                <div class="qs">
+                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg>
+                  <input class="inp" id="qr-search" type="search" placeholder="검색" aria-label="빠른 메시지 검색">
+                </div>
+                <button type="button" class="btn sm" id="qr-new"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg>새 메시지</button>
+              </div>
+              <ul class="qitems" id="qr-list" role="listbox" aria-label="빠른 메시지 목록"></ul>
+              <p class="qnone" id="qr-none" hidden></p>
+              <div class="qfoot">
+                <span class="num" id="qr-count">0개</span>
+                <button type="button" class="btn sm" id="qr-import-btn">가져오기</button>
+                <button type="button" class="btn sm" id="qr-export">내보내기</button>
+                <input type="file" id="qr-import-file" accept=".json,application/json" hidden>
+              </div>
+            </div>
+            <div class="qright">
+              <div class="dirty" id="qr-dirty" role="alert" hidden>
+                <span>저장하지 않은 변경이 있습니다.</span>
+                <button type="button" class="btn sm" id="qr-discard">버리고 이동</button>
+                <button type="button" class="btn sm" id="qr-stay">계속 편집</button>
+              </div>
+              <div class="empty" id="qr-empty" hidden>
+                <b>첫 빠른 메시지를 만들어 보세요</b>
+                <button type="button" class="btn pri" id="qr-new-empty"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg>새 메시지</button>
+              </div>
+              <form id="qr-form" autocomplete="off" novalidate hidden>
+                <p class="qmode" id="qr-form-title">새 빠른 메시지</p>
+                <div class="field">
+                  <label for="qr-title">제목</label>
+                  <input class="inp" id="qr-title" maxlength="50" aria-describedby="qr-title-err">
+                  <span class="ferr" id="qr-title-err"></span>
+                </div>
+                <div class="field">
+                  <label for="qr-text">본문</label>
+                  <textarea class="inp" id="qr-text" rows="6" maxlength="2000" aria-describedby="qr-text-count qr-text-err"></textarea>
+                  <div class="frow"><span class="ferr" id="qr-text-err"></span><span class="cnt" id="qr-text-count">0 / 2,000자</span></div>
+                </div>
+                <div class="field">
+                  <label for="qr-tags">태그 (쉼표로 구분)</label>
+                  <input class="inp" id="qr-tags" placeholder="예: 예약, 안내">
+                </div>
+                <p class="ferr" id="qr-form-msg" role="alert"></p>
+                <div class="actions end" id="qr-actions">
+                  <button type="button" class="btn danger push" id="qr-delete">삭제</button>
+                  <button type="button" class="btn push" id="qr-cancel-new" hidden>취소</button>
+                  <button type="submit" class="btn pri" id="qr-save">저장</button>
+                </div>
+                <div class="actions end" id="qr-del-confirm" hidden>
+                  <span class="push confirm-q">이 메시지를 삭제할까요? 되돌릴 수 없습니다.</span>
+                  <button type="button" class="btn sm danger" id="qr-del-yes">삭제</button>
+                  <button type="button" class="btn sm" id="qr-del-no">취소</button>
+                </div>
+              </form>
+            </div>
+          </section>
+          <p class="result io" id="qr-io-msg" role="status"></p>
+
+          <section class="card" id="qr-import-panel" aria-labelledby="h-import" hidden>
+            <h2 id="h-import">가져오기</h2>
+            <p class="sub" id="qr-import-summary"></p>
+            <ul id="qr-import-errors" class="errors"></ul>
+            <div id="qr-import-choice" hidden>
+              <fieldset class="radios">
+                <legend>적용 방식</legend>
+                <label><input type="radio" name="qr-mode" value="merge" checked> 합치기 <small>id가 같으면 덮어쓰고, 없으면 추가</small></label>
+                <label><input type="radio" name="qr-mode" value="replace"> 전체 교체 <small>기존 목록을 모두 지우고 파일 내용으로 바꿈</small></label>
+              </fieldset>
+              <p id="qr-import-counts" class="counts"></p>
+              <div class="actions">
+                <button type="button" class="btn pri" id="qr-import-apply">적용</button>
+                <button type="button" class="btn" id="qr-import-cancel">취소</button>
+              </div>
+            </div>
+            <div class="actions" id="qr-import-close-row" hidden><button type="button" class="btn" id="qr-import-close">닫기</button></div>
+          </section>
+        </section>
+
+        <!-- ================= 도움말 ================= -->
+        <section class="panel" id="sec-help" data-section="help" aria-labelledby="h-help" hidden>
+          <h1 id="h-help" tabindex="-1">도움말</h1>
+
+          <section class="card faq" aria-labelledby="h-faq">
+            <h2 id="h-faq">자주 생기는 문제</h2>
+            <p class="sub">먼저 아래 세 가지를 확인하세요.</p>
+            <details>
+              <summary><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 3 4 4-4 4"/></svg>번역과 Slack이 모두 안 될 때</summary>
+              <p>확장 프로그램의 사이트 액세스 권한이 꺼져 있을 수 있습니다. 시작하기 메뉴의 1단계에서 네 곳이 모두 "허용"인지 확인하세요. <button type="button" class="linkbtn" data-go="start">시작하기 열기</button></p>
+            </details>
+            <details>
+              <summary><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 3 4 4-4 4"/></svg>"감지가 중단되었습니다" 알림이 왔을 때</summary>
+              <p>수신함 탭이 열려 있는지 확인하고 새로고침하세요. 확장 프로그램을 수정하거나 다시 로드한 뒤에는 수신함 탭도 새로고침해야 합니다.</p>
+            </details>
+            <details>
+              <summary><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 3 4 4-4 4"/></svg>한글이 번역되지 않고 전송될 때</summary>
+              <p>입력창 위 번역 스위치가 켜져 있는지 확인하세요. 번역 메뉴의 "한글 입력을 번역해 전송"도 켜져 있어야 합니다.</p>
+            </details>
+          </section>
+
+          <section class="card" aria-labelledby="h-limits">
+            <h2 id="h-limits">알려진 한계</h2>
+            <p class="sub">이 확장 프로그램은 수신함 화면에 보이는 것만으로 동작합니다.</p>
+            <ul class="lim">
+              <li>이 확장 프로그램은 Meta가 승인한 연동 방식이 아닙니다. 계정 제한 위험이 없다고 보장할 수 없습니다.</li>
+              <li>Slack 알림은 탭이 열려 있고 화면이 갱신되는 동안에만 동작합니다. 모든 메시지를 한 건씩 보장하지 않으며, 연속 메시지는 1건으로 합쳐질 수 있습니다.</li>
+              <li>브라우저가 완전히 꺼지면 감지가 중단되어도 경고를 보낼 수 없습니다.</li>
+              <li>Meta가 화면 구조를 바꾸면 동작이 멈출 수 있습니다.</li>
+              <li>번역 품질은 DeepL에 달려 있습니다. 한글 입력 번역은 확인 단계 없이 전송되므로 오역이 고객에게 그대로 전달될 수 있습니다.</li>
+              <li>상담 내용이 DeepL로 전송됩니다. 텍스트를 저장하지 않고 학습에 쓰지 않는다고 명시한 DeepL 유료 API 요금제를 권장합니다.</li>
+              <li>Slack Webhook 주소와 DeepL 키는 확장 프로그램 저장소에 평문으로 저장됩니다. 확장 프로그램과 브라우저 프로필을 다른 사람과 공유하지 않습니다.</li>
+              <li>채널 탭 전환, 검색, 필터 직후 몇 초 동안 온 메시지는 발신자와 미리보기 없이 미확인 대화 수만 담긴 알림으로 옵니다.</li>
+              <li>같은 고객이 이어서 보낸 메시지는, 그 대화를 읽기 전까지 알림이 다시 오지 않을 수 있습니다.</li>
+              <li>상담원이 대화를 "읽지 않음으로 표시"하면 새 메시지 알림이 나갈 수 있습니다.</li>
+              <li>한글 조합 처리는 운영체제와 입력기에 따라 다르게 동작할 수 있습니다. 검증한 환경에서만 사용합니다.</li>
+            </ul>
+          </section>
+
+          <section class="card" aria-labelledby="h-ver">
+            <h2 id="h-ver">버전</h2>
+            <p class="sub last" id="ver-help">Meta Inbox Helper</p>
+          </section>
+        </section>
+      </main>
     </div>
-    <form id="webhook-form" class="row" autocomplete="off">
-      <input type="password" id="webhook-input" placeholder="https://hooks.slack.com/services/..." autocomplete="off">
-      <button type="submit">저장</button>
-    </form>
-    <p id="webhook-msg" class="msg" role="status"></p>
-    <div class="row">
-      <button type="button" id="btn-test-slack">테스트 메시지 보내기</button>
-      <span id="test-slack-result" class="msg"></span>
-    </div>
-  </section>
+  </div>
 
-  <section id="sec-account">
-    <h2>알림 대상 계정</h2>
-    <label>계정 이름 (Slack 메시지에 표시) <input id="accountName" maxlength="100"></label>
-    <div class="row">
-      <button type="button" id="btn-set-asset">현재 수신함을 알림 대상으로 지정</button>
-      <span id="asset-result" class="msg"></span>
-    </div>
-    <div id="asset-choices" class="row" hidden></div>
-    <p>지정된 값: <code id="asset-current">(없음)</code></p>
-  </section>
-
-  <section id="sec-deepl">
-    <h2>DeepL</h2>
-    <div id="deepl-masked" class="row" hidden>
-      <code id="deepl-masked-text"></code>
-      <button type="button" id="deepl-change">변경</button>
-    </div>
-    <form id="deepl-form" class="row" autocomplete="off">
-      <input type="password" id="deepl-input" placeholder="DeepL API 키" autocomplete="off">
-      <button type="submit">저장</button>
-    </form>
-    <p id="deepl-free-warning" class="warn" hidden>무료 DeepL 키(:fx)입니다. 상담 내용이 의료 정보에 해당하면 DeepL로의 전송은 처리 위탁, 국외 이전 검토 대상일 수 있습니다. 유료 API 요금제는 텍스트를 저장하지 않고 학습에 쓰지 않는다고 명시하므로 유료 요금제를 권장합니다.</p>
-    <p id="deepl-msg" class="msg" role="status"></p>
-    <div class="row">
-      <button type="button" id="btn-check-deepl">키 확인</button>
-      <span id="deepl-check-result" class="msg"></span>
-    </div>
-  </section>
-
-  <section id="sec-translate">
-    <h2>번역</h2>
-    <label class="inline"><input type="checkbox" id="bubbleButtonsEnabled"> 말풍선 번역·복사 버튼 사용</label>
-    <label class="inline"><input type="checkbox" id="sendTranslateEnabled"> 한글 입력을 번역해 전송</label>
-    <label class="inline"><input type="checkbox" id="quickRepliesEnabled"> 빠른 메시지 버튼 사용</label>
-    <label>말풍선 번역 기본 언어 <select id="bubbleTargetLang"></select></label>
-    <label>전송 번역 기본 대상 언어 <select id="sendTargetLang"></select></label>
-  </section>
-
-  <section id="sec-status">
-    <h2>상태</h2>
-    <dl id="status-list" class="status">
-      <dt>마지막 감지 신호</dt><dd id="status-heartbeat">-</dd>
-      <dt>감지 담당 탭</dt><dd id="status-owner">-</dd>
-      <dt>마지막 Slack 전송 결과</dt><dd id="status-slack">-</dd>
-      <dt>대기열 건수</dt><dd id="status-queue">-</dd>
-      <dt>최근 오류</dt><dd id="status-error">-</dd>
-    </dl>
-  </section>
-
-  <section id="sec-guide">
-    <h2>안내</h2>
-    <h3>운영 안내</h3>
-    <ul>
-      <li>수신함 탭을 닫지 않습니다. 상담하던 탭에서 광고 관리 등 수신함 밖으로 이동하면 감지가 멈춥니다. 다른 화면은 새 탭에서 엽니다.</li>
-      <li>두 채널 모두 발신자와 미리보기를 받고 싶으면 Instagram 탭과 WhatsApp 탭을 하나씩 열어 둡니다.</li>
-      <li>브라우저의 탭 절전(메모리 절약) 대상에서 business.facebook.com을 제외합니다.</li>
-    </ul>
-    <h3>알려진 한계</h3>
-    <ul>
-      <li>브라우저가 완전히 꺼지면 감지가 중단되어도 경고를 보낼 수 없습니다.</li>
-      <li>Slack 알림은 탭이 열려 있고 화면이 갱신되는 동안에만 동작합니다. 모든 메시지를 한 건씩 보장하지 않으며, 연속 메시지는 1건으로 합쳐질 수 있습니다.</li>
-      <li>이 확장 프로그램은 Meta가 승인한 연동 방식이 아닙니다. 계정 제한 위험이 없다고 보장할 수 없습니다.</li>
-      <li>번역 품질은 DeepL에 달려 있습니다. 한글 입력 번역은 확인 단계 없이 전송되므로 오역이 고객에게 그대로 전달될 수 있습니다.</li>
-      <li>Slack Webhook 주소와 DeepL 키는 확장 프로그램 저장소에 평문으로 저장됩니다. 확장 프로그램과 브라우저 프로필을 다른 사람과 공유하지 않습니다.</li>
-      <li>채널 탭 전환, 검색, 필터 직후 몇 초 동안 온 메시지는 발신자와 미리보기 없이 건수 알림으로만 옵니다.</li>
-      <li>한글 조합 처리는 운영체제와 입력기에 따라 다르게 동작할 수 있습니다. 검증한 환경에서만 사용합니다.</li>
-    </ul>
-  </section>
+  <div class="toast" id="toast" role="status" aria-live="polite"><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 7.5 2.5 2.5L11 4.5"/></svg><span id="toast-text">저장됨</span></div>
 
   <script src="../lib/constants.js"></script>
   <script src="../lib/settings.js"></script>
   <script src="../lib/quickreplies.js"></script>
+  <script src="../lib/slack.js"></script>
+  <script src="../lib/status.js"></script>
+  <script src="helpers.js"></script>
   <script src="options.js"></script>
 </body>
 </html>

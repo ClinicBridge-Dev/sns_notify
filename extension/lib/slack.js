@@ -7,8 +7,8 @@
   const RETRY_AFTER_CAP_MS = 3600000;
 
   const CHANNEL_LABELS = { wec: 'WhatsApp', instagram_direct: 'Instagram' };
-  const CHANNEL_PATHS = { wec: 'wec', instagram_direct: 'instagram_direct' };
-  const INBOX_BASE = 'https://business.facebook.com/latest/inbox/';
+  // "수신함 열기" 링크. 수신함이 열려 있는 PC의 원격 데스크톱 세션으로 연결한다(채널과 관계없이 같은 주소).
+  const INBOX_URL = 'https://remotedesktop.google.com/access/session/f7455f7a-11ba-3cde-5db9-e240570664dd';
   const UNSUPPORTED_PREFIX = "*Message can't be displayed*";
   const UNSUPPORTED_LINE = '수신함에서 표시되지 않는 유형입니다. WhatsApp Business 앱에서 확인하세요';
 
@@ -43,9 +43,16 @@
 
   function hasDetail(item) { return !!(item.sender || item.preview); }
 
+  // 채널의 현재 배지 숫자(읽지 않은 대화 수, UI 수정 기획서 12-1). 아직 받지 못했으면 '-'.
+  function unreadText(counts, ch) {
+    const v = counts && counts[ch];
+    return typeof v === 'number' && Number.isFinite(v) && v >= 0 ? String(v) : '-';
+  }
+
   // 고객이 쓴 문자열이 들어가는 줄은 text(이스케이프)와 blocks(plain_text) 두 벌로 만든다.
   // 줄: { label, value, customer }. customer 가 아닌 줄(우리가 만든 문구)은 이스케이프만 거친다.
-  function buildSlackPayload(item, settings, now) {
+  // counts: { instagram_direct, wec } 내보내는 시점의 배지 숫자(12-4). 없으면 '-'로 적는다.
+  function buildSlackPayload(item, settings, now, counts) {
     settings = settings || {};
     if (item.type === 'system') {
       const t = String(item.text || '');
@@ -56,10 +63,15 @@
     const detailed = hasDetail(item);
     const count = Number(item.count) > 0 ? Number(item.count) : 1;
 
+    // 숫자는 모두 "대화" 단위다(12-1). 첫 줄의 미확인 대화 수는 그 채널의 현재 배지 숫자이고 항상 적는다(12-3).
+    // 한 번에 배지가 2 이상 늘었으면 새로 온 대화 수도 적는다.
     let title;
     if (item.type === 'supplement') title = '방금 [' + label + '] 알림의 상세';
-    else if (item.kind === 'away') title = detailed ? '자리 비운 사이 새 메시지' : '자리 비운 사이 새 메시지 ' + count + '건';
-    else title = detailed ? '새 메시지' : '새 메시지 ' + count + '건';
+    else {
+      title = (item.kind === 'away' ? '자리 비운 사이 새 메시지' : '새 메시지') + (count >= 2 ? ' (대화 ' + count + '개)' : '');
+      const unread = unreadText(counts, item.channel);
+      title += ' · 미확인 대화 ' + unread + (unread === '-' ? '' : '개');
+    }
     // 보충 알림은 "[채널]" 제목을 쓰지 않고 문구 자체에 채널이 들어 있다.
     const head = item.type === 'supplement' ? (acct ? acct + ' ' : '') + title : acct + '[' + label + '] ' + title;
 
@@ -78,9 +90,13 @@
       lines.push({ k: '', v: '수신함의 ' + label + ' 탭에서 확인하세요', ours: true });
       if (item.manualHint) lines.push({ k: '', v: '수동으로 읽지 않음 표시한 것일 수 있음', ours: true });
     }
+    // 두 채널의 현재 배지 숫자를 항상 함께 적는다(12-3). 한 채널 알림만 봐도 전체 상황을 알 수 있게 한다.
+    if (item.type !== 'supplement') {
+      lines.push({ k: '미확인 현황: ', v: 'Instagram ' + unreadText(counts, 'instagram_direct') + ' · WhatsApp ' + unreadText(counts, 'wec'), ours: true });
+    }
     lines.push({ k: '감지: ', v: hhmm(item.createdAt > 0 ? item.createdAt : now), ours: true });
 
-    const url = INBOX_BASE + (CHANNEL_PATHS[item.channel] || 'all');
+    const url = INBOX_URL;
     const text = [escapeSlackText(head)]
       .concat(lines.map(function (l) { return escapeSlackText(l.k) + escapeSlackText(l.v); }))
       .concat(['수신함 열기: ' + url]).join('\n');

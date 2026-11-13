@@ -15,12 +15,13 @@ test('escapeSlackText escapes &, <, >', () => {
   assert.equal(K.escapeSlackText('a & <b>'), 'a &amp; &lt;b&gt;');
 });
 
-test('detailed notice: channel label, sender, preview, inbox link without thread id', () => {
+test('detailed notice: channel label, sender, preview, inbox link to the remote desktop session', () => {
   const p = K.buildSlackPayload(base, settings, 0);
   assert.match(p.text, /^\[WhatsApp\] 새 메시지/);
   assert.match(p.text, /보낸 사람: Hong Gildong/);
   assert.match(p.text, /내용: 예약 가능한 시간이 궁금합니다/);
-  assert.match(p.text, /https:\/\/business\.facebook\.com\/latest\/inbox\/wec/);
+  assert.match(p.text, /수신함 열기: https:\/\/remotedesktop\.google\.com\/access\/session\/f7455f7a-11ba-3cde-5db9-e240570664dd$/);
+  assert.match(p.blocks[1].text.text, /^<https:\/\/remotedesktop\.google\.com\/access\/session\/f7455f7a-11ba-3cde-5db9-e240570664dd\|수신함 열기>$/);
   assert.doesNotMatch(p.text, /selected_item_id/);
   assert.ok(Array.isArray(p.blocks) && p.blocks.length > 0);
 });
@@ -30,9 +31,9 @@ test('account name is prefixed when set', () => {
   assert.match(p.text, /^\[테스트의원\]\[WhatsApp\] 새 메시지/);
 });
 
-test('count-only notice names where to look and shows the count', () => {
+test('count-only notice names where to look and shows how many conversations arrived at once', () => {
   const p = K.buildSlackPayload({ ...base, channel: 'instagram_direct', count: 3, sender: null, preview: null }, settings, 0);
-  assert.match(p.text, /^\[Instagram\] 새 메시지 3건/);
+  assert.match(p.text, /^\[Instagram\] 새 메시지 \(대화 3개\)/);
   assert.match(p.text, /수신함의 Instagram 탭에서 확인하세요/);
 });
 
@@ -44,7 +45,7 @@ test('manual hint is added only to count-only notices', () => {
 });
 
 test('away, supplement and unsupported-type wording', () => {
-  assert.match(K.buildSlackPayload({ ...base, kind: 'away', count: 4, sender: null, preview: null }, settings, 0).text, /자리 비운 사이 새 메시지 4건/);
+  assert.match(K.buildSlackPayload({ ...base, kind: 'away', count: 4, sender: null, preview: null }, settings, 0).text, /자리 비운 사이 새 메시지 \(대화 4개\)/);
   const sup = K.buildSlackPayload({ ...base, type: 'supplement' }, settings, 0);
   assert.match(sup.text, /방금 \[WhatsApp\] 알림의 상세/);
   assert.doesNotMatch(sup.text, /새 메시지/);
@@ -126,4 +127,51 @@ test('Ruling 13: notConfiguredUpdate writes lastError only when it changes', () 
   assert.equal(K.staleNotConfigured(nc, { slackEnabled: true, slackWebhookUrl: '' }), false);
   assert.equal(K.staleNotConfigured({ source: 'slack', code: 'CONFIG' }, { slackEnabled: false }), false);
   assert.equal(K.staleNotConfigured(null, { slackEnabled: false }), false);
+});
+
+// ---- UI 수정 기획서 12장: 미확인 대화 수 ----
+const counts = { instagram_direct: 3, wec: 2 };
+const firstLine = (p) => p.text.split('\n')[0];
+
+test('12-3: the first line carries the channel badge as unread conversations, always', () => {
+  assert.equal(firstLine(K.buildSlackPayload({ ...base, channel: 'instagram_direct', sender: null, preview: null }, settings, 0, { instagram_direct: 1, wec: 0 })),
+    '[Instagram] 새 메시지 · 미확인 대화 1개');
+  assert.equal(firstLine(K.buildSlackPayload(base, settings, 0, counts)), '[WhatsApp] 새 메시지 · 미확인 대화 2개');
+});
+
+test('12-3: a jump of 2 or more names the new conversations too', () => {
+  assert.equal(firstLine(K.buildSlackPayload({ ...base, count: 2, sender: null, preview: null }, settings, 0, { instagram_direct: 0, wec: 5 })),
+    '[WhatsApp] 새 메시지 (대화 2개) · 미확인 대화 5개');
+});
+
+test('12-3: every notice lists both channels, before the detection time', () => {
+  const p = K.buildSlackPayload(base, settings, 0, counts);
+  const lines = p.text.split('\n');
+  const i = lines.indexOf('미확인 현황: Instagram 3 · WhatsApp 2');
+  assert.ok(i > 0, p.text);
+  assert.match(lines[i + 1], /^감지: /);
+  assert.match(p.blocks[0].text.text, /미확인 현황: Instagram 3 · WhatsApp 2/);
+});
+
+test('12-4: away notices use the same format', () => {
+  assert.equal(firstLine(K.buildSlackPayload({ ...base, kind: 'away', count: 1, sender: null, preview: null }, settings, 0, counts)),
+    '[WhatsApp] 자리 비운 사이 새 메시지 · 미확인 대화 2개');
+});
+
+test('12-4: a channel whose badge is not known yet is shown as "-"', () => {
+  const p = K.buildSlackPayload(base, settings, 0, { instagram_direct: null, wec: 4 });
+  assert.match(p.text, /미확인 현황: Instagram - · WhatsApp 4/);
+  const q = K.buildSlackPayload(base, settings, 0);
+  assert.equal(firstLine(q), '[WhatsApp] 새 메시지 · 미확인 대화 -');
+  assert.match(q.text, /미확인 현황: Instagram - · WhatsApp -/);
+});
+
+test('12-1: no "건" wording is used for message notices', () => {
+  for (const it of [base, { ...base, sender: null, preview: null, count: 3 }, { ...base, kind: 'away', sender: null, preview: null }]) {
+    assert.doesNotMatch(K.buildSlackPayload(it, settings, 0, counts).text, /\d+건/);
+  }
+});
+
+test('system notices are unchanged', () => {
+  assert.equal(K.buildSlackPayload({ type: 'system', text: '감지가 중단되었습니다' }, settings, 0, counts).text, '감지가 중단되었습니다');
 });

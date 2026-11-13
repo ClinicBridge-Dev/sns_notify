@@ -1,4 +1,4 @@
-importScripts('lib/constants.js', 'lib/settings.js', 'lib/serial.js', 'lib/deepl.js', 'lib/threadlang.js', 'lib/badge.js', 'lib/listcand.js', 'lib/slack.js', 'lib/combine.js', 'lib/owner.js', 'lib/watchdog.js');
+importScripts('lib/constants.js', 'lib/settings.js', 'lib/serial.js', 'lib/deepl.js', 'lib/threadlang.js', 'lib/badge.js', 'lib/listcand.js', 'lib/slack.js', 'lib/combine.js', 'lib/owner.js', 'lib/watchdog.js', 'lib/status.js');
 
 const MBX = self.MBX;
 const runSerial = MBX.createSerialQueue();
@@ -29,8 +29,30 @@ function defaultState() {
     slackQueue: [],
     sentKeys: [],
     recentCountAlerts: [],
-    lastError: null
+    lastError: null,
+    statusInfo: defaultStatusInfo() // 설정 화면 상태 표시용(UI 수정 기획서 7-2). 본문, 키, Webhook 주소는 넣지 않는다
   };
+}
+
+function defaultDeeplStatus() { return { checkedAt: 0, ok: false, code: '', used: 0, limit: 0 }; }
+function defaultStatusInfo() { return { deepl: defaultDeeplStatus(), slackTestOkAt: 0 }; }
+
+// statusInfo 일부를 고친다. 직렬 큐 안에서 부른다.
+async function patchStatusInfo(fn) {
+  const { statusInfo } = await loadState(['statusInfo']);
+  const cur = Object.assign(defaultStatusInfo(), statusInfo);
+  cur.deepl = Object.assign(defaultDeeplStatus(), cur.deepl);
+  await saveState({ statusInfo: fn(cur) || cur });
+}
+
+// 사이트 액세스 권한(UI 수정 기획서 7-1). 확인할 수 없으면 허용으로 본다(권한 문제로 잘못 안내하지 않는다).
+async function hasAccess(pattern) {
+  if (!pattern) return true;
+  try { return !!(await chrome.permissions.contains({ origins: [pattern] })); } catch (e) { return true; }
+}
+async function accessOffFor(url) {
+  const pattern = MBX.originPatternFor(url);
+  return !!pattern && !(await hasAccess(pattern));
 }
 
 // 저장소 접근은 이 두 함수로만 한다.
@@ -72,12 +94,13 @@ handlers.GET_QUICK_REPLIES = async function () {
 };
 
 // 대화별 번역 언어. 직렬 큐 안에서 읽고 쓴다. 응답에 threadId를 함께 돌려준다(content가 현재 대화와 비교한다).
+// 값은 { lang: 언어 코드, on: 불리언 } (UI 수정 기획서 4-4). on이 불리언이 아니면 거부한다.
 handlers.SET_THREAD_LANG = async function (msg) {
-  if (typeof msg.threadId !== 'string' || !msg.threadId || !MBX.isValidThreadLang(msg.lang)) {
+  if (typeof msg.threadId !== 'string' || !msg.threadId || !MBX.isValidThreadLang(msg.lang) || typeof msg.on !== 'boolean') {
     return { ok: false, code: 'REJECTED' };
   }
   const { threadLangs } = await loadState(['threadLangs']);
-  await saveState({ threadLangs: MBX.setThreadLang(threadLangs, msg.threadId, msg.lang, Date.now(), MBX.THREAD_LANG_CAP) });
+  await saveState({ threadLangs: MBX.setThreadLang(threadLangs, msg.threadId, msg.lang, msg.on, Date.now(), MBX.THREAD_LANG_CAP) });
   return { ok: true };
 };
 
@@ -85,10 +108,16 @@ handlers.GET_THREAD_LANG = async function (msg) {
   if (typeof msg.threadId !== 'string' || !msg.threadId) return { ok: false, code: 'REJECTED' };
   const st = await loadState(['threadLangs', 'settings']);
   const full = Object.assign({}, MBX.DEFAULT_SETTINGS, st.settings);
-  return { threadId: msg.threadId, lang: MBX.getThreadLang(st.threadLangs, msg.threadId, full.sendTargetLang) };
+  const t = MBX.getThreadLang(st.threadLangs, msg.threadId, full.sendTargetLang, MBX.isValidThreadLang);
+  return { threadId: msg.threadId, lang: t.lang, on: t.on };
 };
 
-handlers.OPEN_OPTIONS = async function () {
+// 설정 화면의 특정 메뉴 열기(UI 수정 기획서 7-3). openOptionsPage 는 해시를 붙일 수 없으므로
+// 메뉴를 storage.session 에 적어 두면 설정 화면이 읽고 지운다. 이미 열린 설정 탭은 앞으로 온다.
+const OPTIONS_SECTIONS = ['start', 'slack', 'translate', 'quick', 'help'];
+handlers.OPEN_OPTIONS = async function (msg) {
+  const section = OPTIONS_SECTIONS.indexOf(msg && msg.section) >= 0 ? msg.section : 'start';
+  try { await chrome.storage.session.set({ pendingOptionsSection: section }); } catch (e) { console.debug('pending section failed'); }
   chrome.runtime.openOptionsPage();
 };
 
@@ -102,6 +131,7 @@ async function deeplFetch(req) {
     return { ok: true, json: await res.json() };
   } catch (e) {
     console.debug('deepl network/timeout');
+    if (await accessOffFor(req.url)) return { ok: false, error: MBX.PERMISSION_OFF };
     return { ok: false, error: MBX.mapDeeplError(0) };
   } finally {
     clearTimeout(timer);
@@ -124,9 +154,13 @@ handlers.TRANSLATE = async function (msg) {
   const key = await getDeeplKey();
   if (!key) return fail(MBX.NO_KEY);
   const r = await deeplFetch(MBX.buildTranslateRequest({ text: text, targetLang: msg.targetLang, purpose: msg.purpose }, key));
-  if (!r.ok) return fail(r.error);
+  if (!r.ok) {
+    if (r.error.code === 'BAD_KEY' || r.error.code === 'QUOTA') await recordDeepl({ ok: false, code: r.error.code });
+    return fail(r.error);
+  }
   const t = r.json && r.json.translations && r.json.translations[0];
   if (!t || typeof t.text !== 'string') return fail(MBX.mapDeeplError(0));
+  await recordDeepl({ ok: true, code: '' }); // used, limit 은 그대로 둔다
   return { ok: true, text: t.text, detectedLang: t.detected_source_language };
 };
 
@@ -134,9 +168,23 @@ handlers.CHECK_DEEPL_KEY = async function () {
   const key = await getDeeplKey();
   if (!key) return fail(MBX.NO_KEY);
   const r = await deeplFetch(MBX.buildUsageRequest(key));
-  if (!r.ok) return fail(r.error);
+  const now = Date.now();
+  if (!r.ok) {
+    await recordDeepl({ checkedAt: now, ok: false, code: r.error.code });
+    return fail(r.error);
+  }
+  const used = Number(r.json.character_count) || 0;
+  const limit = Number(r.json.character_limit) || 0;
+  await recordDeepl({ checkedAt: now, ok: true, code: '', used: used, limit: limit });
   return { ok: true, used: r.json.character_count, limit: r.json.character_limit };
 };
+
+// DeepL 결과를 statusInfo.deepl 에 반영한다(7-2).
+function recordDeepl(part) {
+  return runSerial(function () {
+    return patchStatusInfo(function (si) { si.deepl = Object.assign(si.deepl, part); return si; });
+  }).catch(function () { console.debug('deepl status save failed'); });
+}
 
 chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
   const kind = MBX.classifySender(sender, chrome.runtime.id);
@@ -324,8 +372,17 @@ chrome.storage.onChanged.addListener(function (changes, area) {
   runSerial(async function () {
     const full = await readFullSettings();
     if (changes.settings) {
-      const st = await loadState(['watcherState', 'lastError']);
+      const st = await loadState(['watcherState', 'lastError', 'statusInfo']);
       const patch = {};
+      // 키나 Webhook 주소가 바뀌면 상태 표시용 기록을 되돌린다(7-2). 값은 비교만 하고 어디에도 남기지 않는다.
+      const was = changes.settings.oldValue || {};
+      const now = changes.settings.newValue || {};
+      if ((was.deeplApiKey || '') !== (now.deeplApiKey || '') || (was.slackWebhookUrl || '') !== (now.slackWebhookUrl || '')) {
+        const si = Object.assign(defaultStatusInfo(), st.statusInfo);
+        if ((was.deeplApiKey || '') !== (now.deeplApiKey || '')) si.deepl = defaultDeeplStatus();
+        if ((was.slackWebhookUrl || '') !== (now.slackWebhookUrl || '')) si.slackTestOkAt = 0;
+        patch.statusInfo = si;
+      }
       // 알림 대상 계정이 바뀌면 이전 계정의 배지 기준값을 버린다(잘못된 "자리 비운 사이" 알림 방지). compareBadges 도 같은 확인을 한다.
       const ws = st.watcherState || defaultState().watcherState;
       const ws2 = MBX.resetChannelsForAsset(ws, targetOf(full));
@@ -512,16 +569,32 @@ handlers.SET_ASSET_FROM_OPEN_TAB = async function (msg) {
   return { ok: true, assetId: pick };
 };
 
+// 설정 화면 상태 표시(UI 수정 기획서 6-3, 7-2). DeepL·Slack 으로 요청을 보내지 않는다. 비밀값은 넣지 않는다.
 handlers.GET_STATUS = async function () {
-  const st = await loadState(['watcherState', 'lastSend', 'slackQueue', 'lastError', 'settings']);
+  const st = await loadState(['watcherState', 'lastSend', 'slackQueue', 'lastError', 'settings', 'statusInfo']);
   const ws = st.watcherState || {};
+  const full = Object.assign({}, MBX.DEFAULT_SETTINGS, st.settings);
+  const queue = Array.isArray(st.slackQueue) ? st.slackQueue : [];
+  const si = Object.assign(defaultStatusInfo(), st.statusInfo);
+  const key = typeof full.deeplApiKey === 'string' ? full.deeplApiKey.trim() : '';
+  const fails = Array.isArray(ws.failAlerts) ? ws.failAlerts : [];
+  const permissions = {};
+  const allowed = await Promise.all(MBX.HOST_ORIGINS.map(hasAccess));
+  MBX.HOST_ORIGINS.forEach(function (o, i) { permissions[o] = allowed[i]; });
   return {
     lastHeartbeat: typeof ws.lastHeartbeat === 'number' ? ws.lastHeartbeat : 0,
     lastSend: st.lastSend || null,
-    queueLength: Array.isArray(st.slackQueue) ? st.slackQueue.length : 0,
+    queueLength: queue.length,
     lastError: st.lastError || null,
-    assetId: targetOf(Object.assign({}, MBX.DEFAULT_SETTINGS, st.settings)),
-    ownerTabId: typeof ws.ownerTabId === 'number' ? ws.ownerTabId : null
+    assetId: targetOf(full),
+    ownerTabId: typeof ws.ownerTabId === 'number' ? ws.ownerTabId : null,
+    permissions: permissions,
+    deepl: Object.assign(defaultDeeplStatus(), si.deepl, { hasKey: !!key, free: /:fx$/.test(key) }),
+    slackTestOkAt: typeof si.slackTestOkAt === 'number' ? si.slackTestOkAt : 0,
+    webhookSet: typeof full.slackWebhookUrl === 'string' && full.slackWebhookUrl.trim() !== '',
+    slackEnabled: full.slackEnabled !== false,
+    retryCount: queue.filter(function (it) { return it && it.attempts >= 1; }).length,
+    detect: { everSeen: !!ws.everSeen, failing: fails.length > 0, failReason: fails.length ? fails[fails.length - 1] : null }
   };
 };
 
@@ -586,10 +659,21 @@ async function postSlack(url, payload) {
   }
 }
 
+// 채널별 현재 배지 숫자(읽지 않은 대화 수, UI 수정 기획서 12장). 알림을 만들 때가 아니라 내보내는 시점의 값을 쓴다.
+// 아직 배지 값을 받지 못한 채널은 null(알림에는 '-'로 적힌다).
+function unreadCounts(ws) {
+  const ch = (ws && ws.channels) || {};
+  const out = {};
+  ['instagram_direct', 'wec'].forEach(function (c) {
+    out[c] = ch[c] && ch[c].known && typeof ch[c].base === 'number' ? ch[c].base : null;
+  });
+  return out;
+}
+
 // 1단계(큐 안): 만료 폐기, 중복 폐기, 보낼 항목 선택. 2단계(큐 밖): fetch. 3단계(큐 안): 결과 반영.
 async function flushPass(now) {
   const picked = await runSerial(async function () {
-    const st = await loadState(['slackQueue', 'sentKeys', 'settings', 'lastError']);
+    const st = await loadState(['slackQueue', 'sentKeys', 'settings', 'lastError', 'watcherState']);
     const full = Object.assign({}, MBX.DEFAULT_SETTINGS, st.settings);
     const sentKeys = MBX.pruneSentKeys(Array.isArray(st.sentKeys) ? st.sentKeys : [], now);
     let queue = (Array.isArray(st.slackQueue) ? st.slackQueue : []).filter(function (it) { return now - it.createdAt < MBX.QUEUE_TTL_MS; });
@@ -618,7 +702,7 @@ async function flushPass(now) {
     }
     patch.slackQueue = queue;
     await saveState(patch);
-    return { list: out, url: full.slackWebhookUrl, settings: full };
+    return { list: out, url: full.slackWebhookUrl, settings: full, counts: unreadCounts(st.watcherState) };
   });
   if (!picked.list.length) return;
 
@@ -631,11 +715,12 @@ async function flushPass(now) {
       results.push({ id: o.item.id, key: o.key, system: o.item.type === 'system', attempts: o.item.attempts || 0, status: stop.status, outcome: 'retry', nextTryAt: stop.nextTryAt });
       continue;
     }
-    const r = await postSlack(picked.url, MBX.buildSlackPayload(o.item, picked.settings, now));
+    const r = await postSlack(picked.url, MBX.buildSlackPayload(o.item, picked.settings, now, picked.counts));
     console.debug('slack send', r.status);
     const attempts = o.item.attempts || 0;
     const res = { id: o.item.id, key: o.key, system: o.item.type === 'system', attempts: attempts, status: r.status, outcome: MBX.classifyStatus(r.status) };
     if (res.outcome === 'retry') {
+      if (r.status === 0 && await accessOffFor(picked.url)) res.accessOff = true;
       res.attempts = attempts + 1;
       res.nextTryAt = now + MBX.nextRetryDelayMs(attempts, r.retryAfterSec);
       if (r.status === 0 || r.status === 429) stop = { status: r.status, nextTryAt: res.nextTryAt };
@@ -661,6 +746,8 @@ async function flushPass(now) {
         lastError = slackError('CONFIG', '설정 오류(HTTP ' + r.status + '): Webhook 주소를 확인하세요. 재시도하지 않습니다', r.status);
         badge = '!';
       } else {
+        // 사이트 액세스 권한이 꺼져 실패했으면 대기열에 그대로 두고 이유를 기록한다(7-1).
+        if (r.accessOff) { lastError = slackError(MBX.PERMISSION_OFF.code, MBX.PERMISSION_OFF.message, 0); badge = '!'; }
         queue = queue.map(function (it) {
           return it.id !== r.id ? it : Object.assign({}, it, {
             attempts: r.attempts, nextTryAt: r.nextTryAt
@@ -719,9 +806,12 @@ handlers.SEND_TEST_SLACK = async function () {
   const r = await postSlack(full.slackWebhookUrl, MBX.buildSlackPayload(item, full, now));
   console.debug('slack test send', r.status);
   const outcome = MBX.classifyStatus(r.status);
+  const accessOff = r.status === 0 && await accessOffFor(full.slackWebhookUrl);
   await runSerial(async function () {
-    const cur = await loadState(['lastError']);
+    const cur = await loadState(['lastError', 'statusInfo']);
     const patch = { lastSend: { at: now, outcome: outcome, status: r.status } };
+    // 지금 Webhook 주소로 테스트에 성공한 기록(7-2). 주소를 바꾸면 settings 변경 처리에서 0으로 되돌린다.
+    if (outcome === 'ok') patch.statusInfo = Object.assign(defaultStatusInfo(), cur.statusInfo, { slackTestOkAt: now });
     if (outcome === 'ok' && cur.lastError && cur.lastError.source === 'slack') patch.lastError = null;
     if (outcome === 'config') patch.lastError = slackError('CONFIG', '설정 오류(HTTP ' + r.status + '): Webhook 주소를 확인하세요. 재시도하지 않습니다', r.status);
     await saveState(patch);
@@ -729,6 +819,7 @@ handlers.SEND_TEST_SLACK = async function () {
   });
   if (outcome === 'ok') return { ok: true, status: r.status };
   if (outcome === 'config') return { ok: false, status: r.status, code: 'CONFIG', message: '설정 오류(HTTP ' + r.status + '): Webhook 주소를 확인하세요' };
+  if (accessOff) return { ok: false, status: r.status, code: MBX.PERMISSION_OFF.code, message: '전송하지 못했습니다. ' + MBX.PERMISSION_OFF.message };
   return { ok: false, status: r.status, code: 'FAILED', message: '전송하지 못했습니다(' + (r.status ? 'HTTP ' + r.status : '네트워크 오류') + '). 다시 보내려면 버튼을 한 번 더 누르세요' };
 };
 

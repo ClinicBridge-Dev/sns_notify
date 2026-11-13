@@ -35,7 +35,7 @@ global.MBX.util = {
     env.sends.push(Object.assign({ type }, payload));
     if (type === 'TRANSLATE') return env.translate(payload);
     if (type === 'GET_PUBLIC_SETTINGS') return Promise.resolve({ sendTranslateEnabled: true });
-    if (type === 'GET_THREAD_LANG') return Promise.resolve({ threadId: payload.threadId, lang: 'EN-US' });
+    if (type === 'GET_THREAD_LANG') return Promise.resolve({ threadId: payload.threadId, lang: 'EN-US', on: true });
     return Promise.resolve({ ok: true });
   },
   connected: () => env.port, // port 유무. 판단에는 쓰지 않는다
@@ -78,7 +78,7 @@ function reset(o) {
   }, o || {});
   G.onThreadChanged();
   G.tickClear();
-  G.setLang(env.thread, o && o.lang !== undefined ? o.lang : 'EN-US');
+  G.setLang(env.thread, o && o.lang !== undefined ? o.lang : { lang: 'EN-US', on: true });
   env.toasts.length = 0;
 }
 const enter = (o) => new Ev('keydown', Object.assign({ key: 'Enter', code: 'Enter', keyCode: 13 }, o));
@@ -273,7 +273,7 @@ test('composing Enter then a following non-composing Enter (no compositionend fi
 });
 
 test('composing Enter with translation OFF is left to Meta untouched', () => {
-  reset({ lang: 'OFF' });
+  reset({ lang: { lang: 'EN-US', on: false } });
   const k = enter({ isComposing: true, keyCode: 229 });
   G.onKeyEvent(k);
   assert.equal(k.stopped, false); assert.equal(k.prevented, false);
@@ -357,7 +357,7 @@ test('thread switch right as the paste lands: translation is quarantined, warned
   assert.equal(env.clicks, 0);
   assert.equal(env.text, 'Hello');
   assert.ok(env.toasts.includes(MSG_WRONG));
-  G.setLang('2', 'EN-US');
+  G.setLang('2', { lang: 'EN-US', on: true });
   env.toasts.length = 0;
   for (const ev of [enter(), new Ev('keyup', { key: 'Enter', code: 'Enter' }), new Ev('click', { target: btn }), enter({ isComposing: true, keyCode: 229 })]) {
     (ev.type === 'click' ? G.onPointerEvent : G.onKeyEvent)(ev);
@@ -424,7 +424,7 @@ test('fix round 2: paste reflected in thread B after the thread change but befor
   env.onPaste = (t) => {
     env.thread = '2'; env.text = 'B 대화 초안';
     G.onThreadChanged();          // tick이 대화 전환을 감지(busy 해제)
-    G.setLang('2', 'EN-US');
+    G.setLang('2', { lang: 'EN-US', on: true });
     G.tickClear();                // 아직 반영 전: 격리를 풀면 안 된다
     setTimeout(() => {
       env.text = t;               // Lexical이 늦게 반영 → 번역문이 B의 입력창에
@@ -523,4 +523,40 @@ test('item 5: a blocked screen appearing during translation stops the flow befor
   await idle();
   assert.equal(env.clicks, 0);
   assert.equal(env.text, '안녕하세요');
+});
+
+// ---- UI 수정 기획서 4-2: 도구 막대를 넣지 못한 상태 ----
+test('no toolbar: Korean Enter is blocked with the toolbar notice and nothing is translated', async () => {
+  reset();
+  G.setToolbarMissing(true);
+  const e = enter();
+  G.onKeyEvent(e);
+  assert.equal(e.prevented, true);
+  await idle();
+  assert.equal(translates().length, 0);
+  assert.equal(env.clicks, 0);
+  assert.equal(env.toasts.length, 1);
+  assert.match(env.toasts[0], /번역 도구 막대를 표시하지 못해/);
+  G.setToolbarMissing(false);
+});
+
+test('no toolbar: English text and a thread with translation off still pass to Meta', () => {
+  reset({ text: 'hello' });
+  G.setToolbarMissing(true);
+  const e1 = enter();
+  G.onKeyEvent(e1);
+  assert.equal(e1.prevented, false);
+  reset({ lang: { lang: 'EN-US', on: false } });
+  G.setToolbarMissing(true);
+  const e2 = enter();
+  G.onKeyEvent(e2);
+  assert.equal(e2.prevented, false);
+  G.setToolbarMissing(false);
+});
+
+test('a thread state that is on translates to its language', async () => {
+  reset({ lang: { lang: 'JA', on: true } });
+  G.onKeyEvent(enter());
+  await idle();
+  assert.deepEqual(translates().map((m) => m.targetLang), ['JA']);
 });

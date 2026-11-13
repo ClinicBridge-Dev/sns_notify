@@ -7,7 +7,7 @@
     return typeof s === 'string' && HANGUL.test(s);
   }
 
-  // 판정 순서는 계획서 Task 13 Step 3의 ①~⑩ 그대로다. 순서를 바꾸지 않는다.
+  // 판정 순서는 계획서 Task 13 Step 3의 ①~⑩ 그대로다. 순서를 바꾸지 않는다. ⑦-2는 UI 수정 기획서 4-2에서 더했다.
   function decideSend(ctx) {
     if (ctx.bypass) return 'pass';                       // ① 확장이 이어서 실행한 전송
     if (ctx.busy) return 'swallow';                      // ② 번역 처리 중: Meta에 넘기지 않는다
@@ -15,7 +15,8 @@
     if (!ctx.settingsLoaded) return 'block_loading';     // ④ 설정을 아직 받지 못함
     if (!ctx.enabled) return 'pass';                     // ⑤ 번역 전송 꺼짐
     if (!ctx.langLoaded) return 'block_loading';         // ⑥ 대화별 언어를 아직 받지 못함
-    if (ctx.lang === 'OFF') return 'pass';               // ⑦ 이 대화는 번역 끔
+    if (ctx.on === false) return 'pass';                 // ⑦ 이 대화는 번역 끔(UI 수정 기획서 4-4: on 하나만 본다)
+    if (ctx.toolbar === false) return 'block_no_toolbar'; // ⑦-2 도구 막대를 넣지 못함(UI 수정 기획서 4-2)
     if (ctx.lastTranslated !== null && ctx.lastTranslated !== undefined &&
         ctx.text === ctx.lastTranslated) return 'pass';  // ⑧ 직전 번역 결과 그대로 다시 누름
     if (!ctx.connected) return 'block_disconnected';     // ⑨ 확장 연결 끊김

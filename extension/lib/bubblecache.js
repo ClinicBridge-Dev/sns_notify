@@ -13,7 +13,8 @@
         if (!m.has(k) && m.size >= limit) m.delete(m.keys().next().value);
         m.set(k, v);
       },
-      size: function () { return m.size; }
+      size: function () { return m.size; },
+      _clear: function () { m.clear(); } // 테스트용
     };
   }
 
@@ -24,7 +25,8 @@
     QUOTA: 'DeepL 사용 한도를 초과했습니다',
     RETRY: '잠시 후 다시 시도하세요',
     TOO_LONG: '번역할 수 있는 길이(5000자)를 넘었습니다',
-    DISCONNECTED: '확장 프로그램이 갱신되었습니다. 페이지를 새로고침하세요'
+    DISCONNECTED: '확장 프로그램이 갱신되었습니다. 페이지를 새로고침하세요',
+    PERMISSION_OFF: '확장 프로그램의 사이트 액세스 권한이 꺼져 있습니다' // UI 수정 기획서 7-1
   };
 
   function bubbleErrorText(res) {

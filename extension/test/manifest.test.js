@@ -16,9 +16,11 @@ test('permissions stay exactly storage, alarms, clipboardWrite', () => {
   ]);
 });
 
-test('item 6: options Slack section carries the multi-install notice (spec 6-1)', () => {
+test('item 6: options Slack menu carries the multi-install notice in its 운영 안내 card (spec 6-1, UI 수정 기획서 6-4)', () => {
   const html = require('fs').readFileSync(require('path').join(__dirname, '../options/options.html'), 'utf8');
-  const sec = html.slice(html.indexOf('id="sec-slack"'), html.indexOf('id="sec-slack-connect"'));
+  const start = html.indexOf('id="card-ops"');
+  assert.ok(start > html.indexOf('id="sec-slack"') && start < html.indexOf('id="sec-translate"'), '운영 안내 card must sit in the Slack menu');
+  const sec = html.slice(start, html.indexOf('id="sec-translate"'));
   assert.match(sec, /여러 사람이 각자 설치하면 같은 알림이 사람 수만큼 게시됩니다/);
   assert.match(sec, /알림 담당 브라우저 1대에서만/);
 });

@@ -59,9 +59,10 @@ test('roleFor: not_configured, other_account, standby', () => {
   assert.equal(roleFor({ assetId: '1' }, '1'), 'standby');
 });
 
-test('isValidThreadLang accepts OFF and listed codes only', () => {
+test('isValidThreadLang accepts listed language codes only, not OFF', () => {
   const C = require('../lib/constants.js');
-  assert.equal(C.isValidThreadLang('OFF'), true);
+  assert.equal(C.isValidThreadLang('OFF'), false);
+  assert.equal(C.isValidThreadLang('JA'), true);
   assert.equal(C.isValidThreadLang('PT-BR'), true);
   assert.equal(C.isValidThreadLang('KO'), false);
   assert.equal(C.isValidThreadLang(''), false);

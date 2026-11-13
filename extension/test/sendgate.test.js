@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const G = require('../lib/sendgate.js');
-const ctx = (o = {}) => ({ text: '안녕하세요', bypass: false, busy: false, connected: true, settingsLoaded: true, langLoaded: true, enabled: true, lang: 'EN-US', lastTranslated: null, ...o });
+const ctx = (o = {}) => ({ text: '안녕하세요', bypass: false, busy: false, connected: true, settingsLoaded: true, langLoaded: true, enabled: true, lang: 'EN-US', on: true, toolbar: true, lastTranslated: null, ...o });
 
 test('hasHangul covers syllables and bare jamo', () => {
   for (const s of ['가', 'ㅋㅋ', 'ㅏ', 'ok 네']) assert.equal(G.hasHangul(s), true);
@@ -32,7 +32,28 @@ test('Korean text is blocked until settings and the thread language arrive', () 
 
 test('Korean text passes untranslated when translation is off', () => {
   assert.equal(G.decideSend(ctx({ enabled: false })), 'pass');
-  assert.equal(G.decideSend(ctx({ lang: 'OFF' })), 'pass');
+  assert.equal(G.decideSend(ctx({ on: false })), 'pass');
+});
+
+test('the thread switch is read from on, not from the language value', () => {
+  assert.equal(G.decideSend(ctx({ lang: 'OFF', on: true })), 'intercept');
+  assert.equal(G.decideSend(ctx({ lang: 'JA', on: false })), 'pass');
+});
+
+test('Korean text is blocked when the toolbar could not be shown', () => {
+  assert.equal(G.decideSend(ctx({ toolbar: false })), 'block_no_toolbar');
+});
+
+test('without the toolbar, non-Korean text, translation off and this thread off still pass', () => {
+  assert.equal(G.decideSend(ctx({ toolbar: false, text: 'hello' })), 'pass');
+  assert.equal(G.decideSend(ctx({ toolbar: false, enabled: false })), 'pass');
+  assert.equal(G.decideSend(ctx({ toolbar: false, on: false })), 'pass');
+});
+
+test('order: missing toolbar is checked after this-thread-off and before the repeated translation', () => {
+  assert.equal(G.decideSend(ctx({ toolbar: false, langLoaded: false })), 'block_loading');
+  assert.equal(G.decideSend(ctx({ toolbar: false, text: 'Visit 강남', lastTranslated: 'Visit 강남' })), 'block_no_toolbar');
+  assert.equal(G.decideSend(ctx({ toolbar: false, connected: false })), 'block_no_toolbar');
 });
 
 test('Korean text is blocked when the extension context is gone and translation is on', () => {
@@ -76,7 +97,7 @@ test('order: bypass beats everything, busy beats missing settings and disconnect
   assert.equal(G.decideSend(ctx({ busy: true, connected: false, settingsLoaded: false })), 'swallow');
   // 번역이 꺼져 있으면 연결이 끊겨도 한글 원문을 Meta에 맡긴다(⑤가 ⑨보다 먼저).
   assert.equal(G.decideSend(ctx({ enabled: false, connected: false, langLoaded: false })), 'pass');
-  assert.equal(G.decideSend(ctx({ lang: 'OFF', connected: false })), 'pass');
+  assert.equal(G.decideSend(ctx({ on: false, connected: false })), 'pass');
   // 설정이 없으면 enabled 값과 관계없이 막는다(④가 ⑤보다 먼저).
   assert.equal(G.decideSend(ctx({ settingsLoaded: false, enabled: false })), 'block_loading');
 });
